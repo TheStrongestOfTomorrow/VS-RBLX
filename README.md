@@ -40,7 +40,11 @@ For Roblox Studio testing (without executor globals), paste the contents of [`di
 ## Core Features
 
 ### Authentic VS Code Workbench
-- **Title Bar**: VS-RBLX emblem, top dropdown menus (`File`, `Edit`, `View`, `Run`, `GitHub`), centered Command Center search pill (`Ctrl+P`), **Ghost-Coding Opacity Slider (`30%–100%`)**, **Zen Mode (`Ctrl+Shift+Z`)**, layout toggles, and Minimize / Maximize / Close controls.
+- **Title Bar**: VS-RBLX emblem, top dropdown menus (`File`, `Edit`, `View`, `Run`, `GitHub`), centered Command Center search pill (`Ctrl+P`), **Ghost-Coding Opacity Slider (`30%–100%`)**, **Acode Mobile Mode (`📱` / `☰` Drawer)**, **Zen Mode (`Ctrl+Shift+Z`)**, layout toggles, and Minimize / Maximize / Close controls.
+- **Live Split Preview Engine (`◫ Preview` — Previewable Languages Only)**:
+  - Automatically surfaces **`◫ Preview` (`Open Preview to the Side`)** for previewable languages (`HTML` + live workspace `style.css`, `CSS`, `Markdown`, `JSON`, `YAML`/`TOML`, `SQL`, `Python`, `JavaScript`, and `TypeScript`) and cleanly omits preview UI on non-preview languages (`Luau`, `Rust`, `Go`, `C/C++`, `C#`, `Java`, `Shell`, `Plain Text`).
+- **Mobile "Acode" Mode (Android / Touch Auto-Detect + Play-While-Coding)**:
+  - Automatically detects touch/mobile devices and offers to switch to **Acode Mobile Mode** (or toggle anytime via `📱` in the Title Bar / Command Palette): `☰` slide-over Viewlet drawer, `42px` touch-friendly tabs, **Acode Quick-Keys symbol bar** (`Tab`, `{`, `}`, `(`, `)`, `[`, `]`, `"`, `'`, `=`, `:`, `;`, `↶`, `↷`, `▶ Run`), keyboard-aware viewport scaling, and **`🎮 Play+Code`** split-peek docking so mobile players can play and code simultaneously.
 - **Activity Bar & Side Bar Viewlets**:
   - **Explorer (`Ctrl+Shift+E`)**: Open Editors, inline file/folder creation & `F2` rename on Local Disk (`writefile`/`readfile`/`makefolder`/`delfile`), **1-Click Standalone Project Bundler (`📦` / `Ctrl+Shift+B`)**, and live **Roblox DataModel Explorer** with **3D/GUI Eyedropper Path Picker (`🎯`)**, Copy Luau Path, Property Inspector, and `decompile()` to disk.
   - **Search (`Ctrl+Shift+F`)**: Workspace-wide text search & multi-file replace (`Aa` case-sensitive & `[ab]` whole-word toggles).
@@ -124,7 +128,7 @@ VS-RBLX/
 ## Building & Testing Offline
 
 ```bash
-# 1. Static syntax & require-graph check across init.lua + all 77 modules
+# 1. Static syntax & require-graph check across init.lua + all 80 modules
 luajit test/check.lua init.lua src
 
 # 2. Bundle all modules into dist/vsrblx.lua & dist/vsrblx.localscript.lua

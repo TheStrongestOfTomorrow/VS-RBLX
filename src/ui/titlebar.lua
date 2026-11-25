@@ -11,6 +11,7 @@ return function(env)
 	local config = env.require("runtime/config")
 	local dispose = env.require("runtime/dispose")
 	local commands = env.require("runtime/command_catalog")
+	local languages = env.require("runtime/languages")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
 
@@ -19,6 +20,7 @@ return function(env)
 	function M.new(parent, callbacks)
 		callbacks = callbacks or {}
 		local h = theme.sizes.titleBar
+		local mobileMode = false
 
 		local bar = P.frame(parent, {
 			name = "TitleBar",
@@ -32,6 +34,24 @@ return function(env)
 			pos = UDim2.new(0, 0, 1, -1),
 			bg = theme.color.border,
 			zIndex = 31,
+		})
+
+		-- Mobile Acode `☰` Drawer Toggle (visible in Mobile Mode)
+		local drawerBtn = P.button(bar, {
+			name = "MobileDrawerBtn",
+			size = UDim2.fromOffset(34, h - 2),
+			pos = UDim2.fromOffset(4, 1),
+			hoverBg = theme.color.hover,
+			text = "☰",
+			bold = true,
+			textSize = 16,
+			color = theme.color.titleBarText,
+			radius = 4,
+			visible = false,
+			zIndex = 34,
+			onClick = function()
+				if callbacks.onToggleDrawer then callbacks.onToggleDrawer() end
+			end,
 		})
 
 		local logo = brand.draw(bar, 16, 32)
@@ -89,10 +109,21 @@ return function(env)
 			{
 				label = "View",
 				items = function()
-					return {
+					local viewItems = {
 						{ label = "Command Palette...", shortcut = "Ctrl+Shift+P", onClick = function() commands.run("workbench.commandPalette") end },
 						{ label = "Quick Open File...", shortcut = "Ctrl+P", onClick = function() commands.run("workbench.quickOpen") end },
+					}
+					local curDoc = codeStore.active()
+					if curDoc and languages.isPreviewable(curDoc) then
+						viewItems[#viewItems + 1] = {
+							label = "◫ Open Preview to the Side",
+							onClick = function() commands.run("preview.openToSide") end,
+						}
+					end
+					local tail = {
 						{ separator = true },
+						{ label = "📱 Toggle Acode Mobile Mode", onClick = function() commands.run("workbench.toggleMobileMode") end },
+						{ label = "🎮 Toggle Play-While-Coding Dock", onClick = function() commands.run("mobile.togglePlayWhileCoding") end },
 						{ label = "Toggle Zen Mode", shortcut = "Ctrl+Shift+Z", onClick = function() commands.run("workbench.toggleZenMode") end },
 						{ label = "Ghost Opacity: 100% (Solid)", onClick = function() if callbacks.onSetOpacity then callbacks.onSetOpacity(1.0) end end },
 						{ label = "Ghost Opacity: 70% (Peek)", onClick = function() if callbacks.onSetOpacity then callbacks.onSetOpacity(0.70) end end },
@@ -110,6 +141,8 @@ return function(env)
 						{ label = "Capture Toggle Hotkey...", onClick = function() commands.run("workbench.changeToggleKey") end },
 						{ label = "Reset Auto Window Size", onClick = function() commands.run("window.resetSize") end },
 					}
+					for _, tItem in ipairs(tail) do viewItems[#viewItems + 1] = tItem end
+					return viewItems
 				end,
 			},
 			{
@@ -195,14 +228,28 @@ return function(env)
 			zIndex = 34,
 		})
 
-		-- Right side Ghost-Coding Opacity Slider, Layout Toggles, Zen Mode & Window Controls
+		-- Right side Ghost-Coding Opacity Slider, Mobile Mode, Layout Toggles, Zen Mode & Window Controls
 		local rightCluster = P.frame(bar, {
 			name = "RightControls",
-			size = UDim2.fromOffset(298, h),
-			pos = UDim2.new(1, -298, 0, 0),
+			size = UDim2.fromOffset(328, h),
+			pos = UDim2.new(1, -328, 0, 0),
 			zIndex = 33,
 		})
 		P.list(rightCluster, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
+
+		local mobileToggleBtn = P.button(rightCluster, {
+			name = "MobileModeBtn",
+			size = UDim2.fromOffset(28, 22),
+			hoverBg = theme.color.hover,
+			text = "📱",
+			textSize = 12,
+			radius = 4,
+			order = 0,
+			zIndex = 34,
+			onClick = function()
+				commands.run("workbench.toggleMobileMode")
+			end,
+		})
 
 		-- Interactive Ghost-Coding Opacity Pill (`30%–100%` drag scrub + click presets)
 		local curOpacity = util.clamp(tonumber(config.get("window.opacity", 1.0)) or 1.0, 0.30, 1.0)
@@ -385,9 +432,24 @@ return function(env)
 		refreshTitle()
 		return {
 			root = bar,
+			drawerButton = drawerBtn,
+			mobileButton = mobileToggleBtn,
 			opacityButton = opacityBtn,
 			refresh = refreshTitle,
 			refreshOpacity = refreshOpacityUi,
+			setMobileMode = function(flag)
+				mobileMode = flag == true
+				h = mobileMode and 38 or theme.sizes.titleBar
+				bar.Size = UDim2.new(1, 0, 0, h)
+				drawerBtn.Visible = mobileMode
+				drawerBtn.Size = UDim2.fromOffset(34, h - 2)
+				logo.Visible = not mobileMode
+				menuRow.Position = UDim2.fromOffset(mobileMode and 40 or 34, 0)
+				menuRow.Size = UDim2.fromOffset(250, h)
+				menuRow.Visible = not mobileMode
+				mobileToggleBtn.BackgroundColor3 = mobileMode and theme.color.accent or theme.color.titleBar
+				mobileToggleBtn.BackgroundTransparency = mobileMode and 0 or 1
+			end,
 		}
 	end
 

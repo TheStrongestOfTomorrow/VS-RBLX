@@ -61,6 +61,16 @@ return function(env)
 		roblox = {
 			captureLogService = true,
 		},
+		preview = {
+			autoRefresh = true,
+		},
+		mobile = {
+			mode = "auto",
+			promptedOnce = false,
+			quickKeys = true,
+			playWhileCoding = false,
+			keyboardInset = 0,
+		},
 		window = {
 			autoResize = true,
 			widthScale = 0.84,

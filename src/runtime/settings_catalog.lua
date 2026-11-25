@@ -189,6 +189,39 @@ return function(_env)
 			description = "Streams Roblox print(), warn(), and error() output into the OUTPUT console with stack-jump.",
 			kind = "boolean",
 		},
+		{
+			key = "preview.autoRefresh",
+			category = "Preview",
+			title = "Live Preview Auto-Refresh",
+			description = "Automatically updates the Split Preview pane as you edit HTML, CSS, Markdown, JSON/YAML, SQL, Python, or JS/TS.",
+			kind = "boolean",
+		},
+		{
+			key = "mobile.mode",
+			category = "Mobile",
+			title = "Acode Mobile Layout Mode",
+			description = "Controls touch-optimized Acode layout (slide-over drawer, 40px touch tabs, symbol bar).",
+			kind = "select",
+			options = {
+				{ value = "auto", label = "Auto-Detect Touch (Prompt)" },
+				{ value = "on", label = "Always On (Mobile Mode)" },
+				{ value = "off", label = "Always Off (Desktop Mode)" },
+			},
+		},
+		{
+			key = "mobile.quickKeys",
+			category = "Mobile",
+			title = "Acode Quick-Keys Symbol Bar",
+			description = "Shows the 1-tap coding symbol strip ({ } ( ) [ ] = : \" ' Tab Undo/Redo) in Mobile Mode.",
+			kind = "boolean",
+		},
+		{
+			key = "mobile.playWhileCoding",
+			category = "Mobile",
+			title = "Play-While-Coding Split Peek",
+			description = "Docks VS-RBLX to the right side at translucent Ghost opacity so you can play and code simultaneously.",
+			kind = "boolean",
+		},
 	}
 
 	function M.categories()

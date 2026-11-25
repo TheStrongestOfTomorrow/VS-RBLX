@@ -1,10 +1,13 @@
--- VS Code Multi-Tab Editor Bar with Seti file badges, dirty dots (`●`) with hover `✕`,
--- pin state, unsaved close prompt, Run (`▶`) button, Save button, and Split Editor button.
+-- VS Code Multi-Tab Editor Bar (`src/ui/code/tabs.lua`):
+-- Seti file badges, dirty dots (`●`) with hover `✕`, pin state, unsaved close prompt,
+-- Language-Gated `◫ Preview` (`Open Preview to the Side` — shown ONLY on previewable
+-- languages, omitted on non-preview languages), Run (`▶`), Save, Split, and `40px` Touch Mode.
 return function(env)
 	local P = env.require("ui/primitives")
 	local theme = env.require("ui/theme")
 	local icons = env.require("ui/icons")
 	local overlay = env.require("ui/overlay")
+	local languages = env.require("runtime/languages")
 	local codeStore = env.require("runtime/code_store")
 	local commands = env.require("runtime/command_catalog")
 	local clipboard = env.require("runtime/clipboard")
@@ -14,6 +17,7 @@ return function(env)
 	function M.new(parent, paneName)
 		local pane = paneName or "primary"
 		local h = theme.sizes.tabBar
+		local mobileMode = false
 
 		local root = P.frame(parent, {
 			name = "TabBar_" .. pane,
@@ -30,7 +34,7 @@ return function(env)
 
 		local tabsScroll = P.scroll(root, {
 			name = "TabsScroll",
-			size = UDim2.new(1, -106, 1, -1),
+			size = UDim2.new(1, -180, 1, -1),
 			direction = Enum.ScrollingDirection.X,
 			autoCanvas = Enum.AutomaticSize.X,
 			barThickness = 3,
@@ -40,32 +44,52 @@ return function(env)
 
 		local actionsBar = P.frame(root, {
 			name = "EditorActions",
-			size = UDim2.fromOffset(102, h - 1),
-			pos = UDim2.new(1, -104, 0, 0),
+			size = UDim2.fromOffset(174, h - 1),
+			pos = UDim2.new(1, -176, 0, 0),
 			zIndex = 22,
 		})
-		P.list(actionsBar, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
+		P.list(actionsBar, Enum.FillDirection.Horizontal, 3, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
 
-		P.button(actionsBar, {
+		-- Language-gated Live Split Preview button (strictly hidden on non-previewable languages!)
+		local previewBtn = P.button(actionsBar, {
+			name = "OpenPreviewBtn_" .. pane,
+			size = UDim2.fromOffset(66, 26),
+			bg = theme.color.accent,
+			hoverBg = theme.color.accentHover,
+			color = Color3.fromRGB(255, 255, 255),
+			bold = true,
+			text = "◫ Preview",
+			textSize = 11,
+			radius = 4,
+			visible = false,
+			order = 1,
+			zIndex = 23,
+			onClick = function()
+				commands.run("preview.openToSide")
+			end,
+		})
+		previewBtn.BackgroundTransparency = 0
+
+		local runBtn = P.button(actionsBar, {
 			name = "RunTabBtn",
 			size = UDim2.fromOffset(30, 26),
 			text = "▶",
 			bold = true,
 			color = theme.color.good,
 			radius = 4,
-			order = 1,
+			order = 2,
 			zIndex = 23,
 			onClick = function() commands.run("run.active") end,
 		})
 
-		P.button(actionsBar, {
+		local saveBtn = P.button(actionsBar, {
 			name = "SaveTabBtn",
-			size = UDim2.fromOffset(34, 26),
+			size = UDim2.fromOffset(36, 26),
 			text = "Save",
 			textSize = 11,
 			color = theme.color.sideBarText,
 			radius = 4,
-			order = 2,
+			order = 3,
 			zIndex = 23,
 			onClick = function() commands.run("file.save") end,
 		})
@@ -77,20 +101,36 @@ return function(env)
 			textSize = 14,
 			color = theme.color.sideBarText,
 			radius = 4,
-			order = 3,
+			order = 4,
 			zIndex = 23,
 			onClick = function() codeStore.toggleSplit() end,
 		})
 
 		local function rebuild()
-			tabsScroll:ClearAllChildren()
-			P.list(tabsScroll, Enum.FillDirection.Horizontal, 1)
+			root.Size = UDim2.new(1, 0, 0, h)
+			actionsBar.Size = UDim2.fromOffset(178, h - 1)
+			actionsBar.Position = UDim2.new(1, -180, 0, 0)
+
 			local activeDoc = codeStore.active(pane)
 			local activeId = activeDoc and activeDoc.id or nil
+			local canPrev = (pane == "primary") and (activeDoc ~= nil) and languages.isPreviewable(activeDoc)
+			previewBtn.Visible = canPrev
+			local actionW = canPrev and 180 or 108
+			tabsScroll.Size = UDim2.new(1, -actionW, 1, -1)
+
+			local btnH = mobileMode and 32 or 26
+			previewBtn.Size = UDim2.fromOffset(68, btnH)
+			runBtn.Size = UDim2.fromOffset(mobileMode and 34 or 30, btnH)
+			saveBtn.Size = UDim2.fromOffset(mobileMode and 40 or 36, btnH)
+			splitBtn.Size = UDim2.fromOffset(mobileMode and 32 or 28, btnH)
+
+			tabsScroll:ClearAllChildren()
+			P.list(tabsScroll, Enum.FillDirection.Horizontal, 1)
 
 			for idx, doc in ipairs(codeStore.tabs) do
 				local isCurrent = (doc.id == activeId)
-				local tabW = math.max(116, math.min(206, #doc.title * 7 + (doc.pinned and 68 or 58)))
+				local minTabW = mobileMode and 132 or 116
+				local tabW = math.max(minTabW, math.min(216, #doc.title * 7 + (doc.pinned and 72 or 62)))
 				local tabBtn = P.button(tabsScroll, {
 					name = "Tab_" .. doc.title,
 					size = UDim2.fromOffset(tabW, h - 1),
@@ -109,7 +149,7 @@ return function(env)
 				if isCurrent then
 					P.frame(tabBtn, {
 						name = "ActiveTopAccent",
-						size = UDim2.new(1, 0, 0, 2),
+						size = UDim2.new(1, 0, 0, mobileMode and 3 or 2),
 						bg = theme.color.tabActiveTop,
 						zIndex = 24,
 					})
@@ -132,11 +172,12 @@ return function(env)
 					titleX = 44
 				end
 
+				local closeSize = mobileMode and 26 or 20
 				P.label(tabBtn, {
-					size = UDim2.new(1, -(titleX + 28), 1, 0),
+					size = UDim2.new(1, -(titleX + closeSize + 8), 1, 0),
 					pos = UDim2.fromOffset(titleX, 0),
 					text = doc.title,
-					textSize = 12,
+					textSize = mobileMode and 13 or 12,
 					color = isCurrent and theme.color.tabActiveText or theme.color.tabInactiveText,
 					truncate = true,
 					zIndex = 23,
@@ -145,12 +186,12 @@ return function(env)
 				local restingGlyph = doc.dirty and "●" or (doc.pinned and "•" or "✕")
 				local closeOrDot = P.button(tabBtn, {
 					name = "CloseTabBtn",
-					size = UDim2.fromOffset(20, 20),
-					pos = UDim2.new(1, -24, 0.5, -10),
+					size = UDim2.fromOffset(closeSize, closeSize),
+					pos = UDim2.new(1, -(closeSize + 4), 0.5, -math.floor(closeSize * 0.5)),
 					text = restingGlyph,
 					textSize = doc.dirty and 12 or 11,
 					color = doc.dirty and theme.color.tabActiveText or theme.color.muted,
-					radius = 3,
+					radius = 4,
 					zIndex = 24,
 					onClick = function()
 						if doc.pinned then
@@ -178,6 +219,15 @@ return function(env)
 						{ label = doc.pinned and "Unpin Tab" or "Pin Tab", onClick = function() codeStore.togglePin(doc.id) end },
 						{ label = "Save to Local Disk", shortcut = "Ctrl+S", onClick = function() codeStore.save(doc.id) end },
 					}
+					if languages.isPreviewable(doc) then
+						menu[#menu + 1] = {
+							label = "◫ Open Preview to the Side",
+							onClick = function()
+								codeStore.activate(doc.id, "primary")
+								commands.run("preview.openToSide")
+							end,
+						}
+					end
 					if doc.path and doc.path ~= "" then
 						menu[#menu + 1] = {
 							label = "Copy Relative Path",
@@ -199,7 +249,7 @@ return function(env)
 					menu[#menu + 1] = { label = "Close to the Right", onClick = function() codeStore.closeToRight(doc.id) end }
 					menu[#menu + 1] = { label = "Close Saved", onClick = function() codeStore.closeSaved() end }
 					menu[#menu + 1] = { label = "Close All Clean Tabs", onClick = function() codeStore.closeAll() end }
-					overlay.dropdown(p.X, p.Y + h, menu, 196)
+					overlay.dropdown(p.X, p.Y + h, menu, 210)
 				end)
 			end
 		end
@@ -208,6 +258,7 @@ return function(env)
 		theme.changed:connect(function()
 			root.BackgroundColor3 = theme.color.tabBar
 			bottomBorder.BackgroundColor3 = theme.color.border
+			previewBtn.BackgroundColor3 = theme.color.accent
 			splitBtn.TextColor3 = theme.color.sideBarText
 			rebuild()
 		end)
@@ -215,7 +266,14 @@ return function(env)
 		rebuild()
 		return {
 			root = root,
+			previewButton = previewBtn,
 			refresh = rebuild,
+			height = function() return h end,
+			setMobileMode = function(flag)
+				mobileMode = flag == true
+				h = mobileMode and 42 or theme.sizes.tabBar
+				rebuild()
+			end,
 			setTransparency = function(bgTrans)
 				root.BackgroundTransparency = bgTrans
 				rebuild()

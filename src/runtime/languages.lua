@@ -266,9 +266,22 @@ return function(env)
 		},
 	}
 
+	local PREVIEWABLE = {
+		html = true,
+		css = true,
+		markdown = true,
+		json = true,
+		yaml = true,
+		sql = true,
+		python = true,
+		javascript = true,
+		typescript = true,
+	}
+
 	local byId = {}
 	local byExt = {}
 	for _, lang in ipairs(LIST) do
+		lang.previewable = PREVIEWABLE[lang.id] == true
 		byId[lang.id] = lang
 		for _, ext in ipairs(lang.extensions) do
 			byExt[ext:lower()] = lang
@@ -280,6 +293,14 @@ return function(env)
 
 	function M.get(id)
 		return byId[tostring(id or ""):lower()] or byId.plaintext
+	end
+
+	function M.isPreviewable(langIdOrDoc)
+		if type(langIdOrDoc) == "table" then
+			if langIdOrDoc.isDiff then return false end
+			return PREVIEWABLE[tostring(langIdOrDoc.langId or ""):lower()] == true
+		end
+		return PREVIEWABLE[tostring(langIdOrDoc or ""):lower()] == true
 	end
 
 	function M.detect(path, content)
