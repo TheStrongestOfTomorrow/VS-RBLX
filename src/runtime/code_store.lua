@@ -369,9 +369,11 @@ return function(env)
 		return count
 	end
 
-	function M.close(id)
+	function M.close(id, opts)
+		opts = opts or {}
 		local doc = M.byId[id]
-		if not doc or doc.pinned then return false end
+		if not doc then return false end
+		if doc.pinned and not opts.force then return false end
 		local closedIdx = 1
 		for i = 1, #M.tabs do
 			if M.tabs[i].id == id then
@@ -391,6 +393,76 @@ return function(env)
 			if not M.secondaryId then M.splitOpen = false end
 		end
 		M.changed:fire({ reason = "close", id = id })
+		return true
+	end
+
+	-- Interactive tab close: prompts Save / Don't Save / Cancel when dirty
+	function M.requestClose(id)
+		local doc = M.byId[id]
+		if not doc then return false end
+		if doc.pinned then return false end
+		if doc.dirty and not doc.readOnly and not doc.isDiff and type(M.dirtyCloseHandler) == "function" then
+			M.dirtyCloseHandler(doc)
+			return "prompted"
+		end
+		return M.close(id)
+	end
+
+	function M.closeToRight(fromId)
+		local foundIdx = nil
+		for i = 1, #M.tabs do
+			if M.tabs[i].id == fromId then
+				foundIdx = i
+				break
+			end
+		end
+		if not foundIdx then return end
+		for i = #M.tabs, foundIdx + 1, -1 do
+			local tab = M.tabs[i]
+			if not tab.pinned and not tab.dirty then
+				M.byId[tab.id] = nil
+				table.remove(M.tabs, i)
+			end
+		end
+		if M.activeId and not M.byId[M.activeId] then
+			M.activeId = fromId
+		end
+		M.changed:fire({ reason = "closeToRight", id = fromId })
+	end
+
+	function M.closeAll(opts)
+		opts = opts or {}
+		for i = #M.tabs, 1, -1 do
+			local tab = M.tabs[i]
+			if opts.force or (not tab.pinned and not tab.dirty) then
+				M.byId[tab.id] = nil
+				table.remove(M.tabs, i)
+			end
+		end
+		M.activeId = M.tabs[1] and M.tabs[1].id or nil
+		if M.secondaryId and not M.byId[M.secondaryId] then
+			M.secondaryId = nil
+			M.splitOpen = false
+		end
+		M.changed:fire({ reason = "closeAll" })
+	end
+
+	function M.renameOpenFile(oldPath, newPath)
+		local cleanOld = util.normalisePath(oldPath)
+		local cleanNew = util.normalisePath(newPath)
+		local doc = M.byId["file:" .. cleanOld]
+		if not doc or cleanNew == "" then return false end
+		local oldId = doc.id
+		local newId = "file:" .. cleanNew
+		M.byId[oldId] = nil
+		doc.id = newId
+		doc.path = cleanNew
+		doc.title = util.basename(cleanNew)
+		doc.langId = languages.detect(cleanNew, doc.content).id
+		M.byId[newId] = doc
+		if M.activeId == oldId then M.activeId = newId end
+		if M.secondaryId == oldId then M.secondaryId = newId end
+		M.changed:fire({ reason = "rename", oldId = oldId, id = newId, path = cleanNew })
 		return true
 	end
 

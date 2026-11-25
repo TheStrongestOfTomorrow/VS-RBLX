@@ -4,6 +4,7 @@ return function(env)
 	local config = env.require("runtime/config")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
+	local todoScanner = env.require("runtime/todo_scanner")
 	local gitState = env.require("runtime/git_state")
 	local commands = env.require("runtime/command_catalog")
 	local theme = env.require("ui/theme")
@@ -26,6 +27,7 @@ return function(env)
 			workspace = workspaceFs,
 			codeStore = codeStore,
 			editor = codeStore,
+			todos = todoScanner,
 			git = gitState,
 			github = githubSync,
 			theme = theme,
@@ -39,6 +41,15 @@ return function(env)
 			runActive = function() return execution.runActive() end,
 			runCommand = function(id, ...) return commands.run(id, ...) end,
 			setTheme = function(themeId) return theme.apply(themeId) end,
+			setOpacity = function(alpha)
+				if app and app.window then return app.window.setOpacity(alpha) end
+				return nil
+			end,
+			getOpacity = function()
+				if app and app.window then return app.window.getOpacity() end
+				return 1.0
+			end,
+			toggleZenMode = function() return commands.run("workbench.toggleZenMode") end,
 			show = function() if app and app.window then app.window.show() end end,
 			hide = function() if app and app.window then app.window.hide() end end,
 			toggle = function() if app and app.window then app.window.toggle() end end,

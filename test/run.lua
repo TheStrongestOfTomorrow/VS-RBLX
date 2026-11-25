@@ -62,7 +62,7 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 69, "All 69 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 70, "All 70 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
 
 	local gui = H.screen()
@@ -262,7 +262,83 @@ check("5. 17-Language Syntax Lexer, IntelliSense, Diagnostics, Search, Formatter
 	api.setTheme("dark_plus")
 end)
 
-check("6. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+check("6. Phase 1 QoL: Ghost Opacity, Zen Mode, Seti Icons, Inline Explorer, Dirty Prompt & TODOs", function()
+	-- (A) Ghost-Coding Opacity Slider (`30%–100%`)
+	assertTrue(H.byName("OpacitySliderPill") ~= nil, "OpacitySliderPill mounted in TitleBar")
+	assertEq(api.getOpacity(), 1.0, "Default opacity is 100%")
+	api.setOpacity(0.45)
+	assertEq(api.getOpacity(), 0.45, "Opacity updated to 45%")
+	local editorsRegion = H.byName("EditorsRegion")
+	assertTrue(math.abs(editorsRegion.BackgroundTransparency - 0.55) < 0.01, "EditorsRegion became 55% transparent without stacking")
+	api.setOpacity(0.10)
+	assertEq(api.getOpacity(), 0.30, "Opacity clamped at 30% minimum")
+	api.runCommand("window.opacityReset")
+	assertEq(api.getOpacity(), 1.0, "window.opacityReset restored 100% opacity")
+
+	-- (B) Zen Mode (`Ctrl+Shift+Z`) enter & exact layout state restore
+	local actBar = H.byName("ActivityBar")
+	local sideBar = H.byName("PrimarySideBar")
+	local statusBar = H.byName("StatusBar")
+	local zenPill = H.byName("ZenExitPill")
+	assertTrue(actBar.Visible == true and sideBar.Visible == true and statusBar.Visible == true, "Chrome visible before Zen Mode")
+	api.toggleZenMode()
+	assertTrue(api.app.isZenMode() == true, "Zen Mode active")
+	assertTrue(actBar.Visible == false and sideBar.Visible == false and statusBar.Visible == false, "Chrome hidden in Zen Mode")
+	assertTrue(zenPill.Visible == true, "Floating ZenExitPill shown")
+	api.toggleZenMode()
+	assertTrue(api.app.isZenMode() == false, "Zen Mode exited")
+	assertTrue(actBar.Visible == true and sideBar.Visible == true and statusBar.Visible == true, "Pre-Zen layout restored")
+
+	-- (C) Crisp Seti File Badges
+	assertTrue(H.byName("SetiBadge") ~= nil, "Seti file badges rendered in Explorer & Tabs")
+
+	-- (D) Inline Explorer Create + Validation + Inline Rename (preserving open tab)
+	local tree = api.app.viewlets.explorer.fileTree
+	tree.promptNewFile("src")
+	assertTrue(H.byName("InlineExplorerInput") ~= nil, "Inline Explorer TextBox rendered directly inside file tree")
+	local badOk, badErr = tree.commitInline("bad:name?.luau")
+	assertTrue(badOk == false and badErr ~= nil, "Inline Explorer rejected invalid filename characters")
+	assertTrue(H.byName("InlineErrorBanner").Visible == true, "Inline validation error banner displayed")
+
+	local createOk, createdPath = tree.commitInline("abilities.luau")
+	assertTrue(createOk == true and createdPath == "src/abilities.luau", "Inline Explorer created src/abilities.luau")
+	local abilDoc = api.codeStore.findByPath("src/abilities.luau")
+	assertTrue(abilDoc ~= nil, "Newly created file automatically opened in editor")
+	api.codeStore.updateContent(abilDoc.id, "-- TODO: balance cooldowns\n-- FIXME: fix mana cost\nreturn { dash = 5 }\n")
+
+	-- Inline rename open file -> keeps open tab & undo stack intact!
+	assertTrue(tree.startRename("src/abilities.luau"), "Started inline rename on src/abilities.luau")
+	local renOk, renPath = tree.commitInline("skills.luau")
+	assertTrue(renOk == true and renPath == "src/skills.luau", "Renamed to src/skills.luau on disk")
+	local renamedDoc = api.codeStore.findByPath("src/skills.luau")
+	assertTrue(renamedDoc == abilDoc and renamedDoc.title == "skills.luau", "Open tab seamlessly re-bound on rename")
+	assertTrue(#renamedDoc.undoStack >= 1, "Undo stack preserved across inline rename")
+
+	-- (E) TODO / FIXME / NOTE Lexer Highlighting & Workspace Scanner
+	local lexer = api._env.require("runtime/code_lexer")
+	local scanned = lexer.scan(renamedDoc.content, "luau")
+	local richTodo = lexer.rich(scanned.lines[1], scanned.spans[1], api.theme.syntax)
+	assertTrue(richTodo:find("#ffcc00", 1, true) ~= nil, "Lexer highlighted TODO: in bold gold")
+	local richFixme = lexer.rich(scanned.lines[2], scanned.spans[2], api.theme.syntax)
+	assertTrue(richFixme:find("#f14c4c", 1, true) ~= nil, "Lexer highlighted FIXME: in bold red")
+
+	local todoItems, todoCounts = api.todos.scanAll()
+	assertTrue(todoCounts.total >= 2 and todoCounts.fixme >= 1 and todoCounts.todo >= 1, "todo_scanner indexed TODO & FIXME tags")
+	api.runCommand("view.todos")
+	assertTrue(H.byName("TodosView").Visible == true, "view.todos focused Bottom Panel TODOS tab")
+
+	-- (F) Dirty-Tab Close Confirmation Prompt (Save / Don't Save / Cancel)
+	assertTrue(renamedDoc.dirty == true, "skills.luau is dirty before close")
+	local closeRes = api.codeStore.requestClose(renamedDoc.id)
+	assertEq(closeRes, "prompted", "Dirty tab close opened confirmation modal instead of losing work")
+	assertTrue(H.byName("ConfirmModal") ~= nil, "VS Code ConfirmModal mounted")
+	-- Click "Save" (`ConfirmPrimaryBtn`) to save to disk and close cleanly
+	H.click(H.byName("ConfirmPrimaryBtn"))
+	assertTrue(api.codeStore.findByPath("src/skills.luau") == nil, "Tab closed after confirming Save")
+	assertTrue(H.sandbox.readfile("VSRBLX/workspaces/OctoDev__CombatEngine/src/skills.luau"):find("FIXME: fix mana cost", 1, true) ~= nil, "Confirm Save persisted buffer via writefile")
+end)
+
+check("7. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
 	-- Re-running the same build toggles visibility and returns existing handle
 	local secondChunk = assert(H.sandbox.loadstring(
 		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',

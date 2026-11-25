@@ -4,6 +4,7 @@ return function(env)
 	local config = env.require("runtime/config")
 	local dispose = env.require("runtime/dispose")
 	local clock = env.require("runtime/clock")
+	local signal = env.require("runtime/signal")
 	local theme = env.require("ui/theme")
 	local responsive = env.require("ui/responsive")
 	local brand = env.require("ui/brand")
@@ -18,10 +19,13 @@ return function(env)
 	local M = {}
 
 	function M.new(parentScreen)
+		local initOpacity = util.clamp(tonumber(config.get("window.opacity", 1.0)) or 1.0, 0.30, 1.0)
 		local win = {
 			visible = true,
 			minimised = false,
 			maximised = config.get("window.maximised", false) == true,
+			opacity = initOpacity,
+			opacityChanged = signal.new("window.opacityChanged"),
 			snappedSide = nil,
 			onResize = nil,
 		}
@@ -31,6 +35,7 @@ return function(env)
 			size = UDim2.fromOffset(980, 620),
 			pos = UDim2.fromOffset(100, 60),
 			bg = theme.color.editor,
+			transparency = 1,
 			radius = 6,
 			clip = true,
 			active = true,
@@ -364,6 +369,23 @@ return function(env)
 
 		function win.toggleMaximise()
 			win.setMaximised(not win.maximised)
+		end
+
+		function win.setOpacity(alpha, opts)
+			opts = opts or {}
+			local clamped = math.floor(util.clamp(tonumber(alpha) or 1.0, 0.30, 1.0) * 100 + 0.5) / 100
+			win.opacity = clamped
+			config.set("window.opacity", clamped, { quiet = opts.quiet == true, immediate = opts.immediate == true })
+			win.opacityChanged:fire(clamped)
+			return clamped
+		end
+
+		function win.getOpacity()
+			return win.opacity
+		end
+
+		function win.stepOpacity(delta)
+			return win.setOpacity(win.opacity + (tonumber(delta) or 0))
 		end
 
 		function win.resetAutoSize()

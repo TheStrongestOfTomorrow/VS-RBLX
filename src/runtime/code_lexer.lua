@@ -265,6 +265,77 @@ return function(env)
 		return spans, state
 	end
 
+	local TODO_TAG_KIND = {
+		TODO = "todo_tag",
+		FIXME = "todo_fixme",
+		BUG = "todo_fixme",
+		HACK = "todo_tag",
+		NOTE = "todo_note",
+	}
+
+	local function splitCommentTodoSpans(text, spans)
+		if not spans or #spans == 0 then return spans end
+		local hasComment = false
+		for i = 1, #spans do
+			if spans[i].kind == "comment" then
+				hasComment = true
+				break
+			end
+		end
+		if not hasComment then return spans end
+
+		local out = {}
+		for idx = 1, #spans do
+			local sp = spans[idx]
+			if sp.kind ~= "comment" then
+				out[#out + 1] = sp
+			else
+				local cursor = sp.first
+				local stopAt = sp.last
+				local scanPos = cursor
+				while scanPos <= stopAt do
+					local mStart, mEnd, rawTag = text:find("([%a]+)", scanPos)
+					if not mStart or mStart > stopAt then
+						break
+					end
+					if mEnd > stopAt then
+						mEnd = stopAt
+						rawTag = text:sub(mStart, mEnd)
+					end
+					local tagKind = TODO_TAG_KIND[rawTag:upper()]
+					local prevCh = mStart > 1 and text:sub(mStart - 1, mStart - 1) or " "
+					local nextCh = mEnd < #text and text:sub(mEnd + 1, mEnd + 1) or ""
+					local validBoundary = (not prevCh:match("[%w_]"))
+						and (nextCh == ":" or nextCh == "(" or nextCh == " " or nextCh == "-" or rawTag == rawTag:upper())
+					if tagKind and validBoundary then
+						local tagEnd = mEnd
+						if text:sub(tagEnd + 1, tagEnd + 1) == "(" then
+							local closeParen = text:find(")", tagEnd + 2, true)
+							if closeParen and closeParen <= stopAt and closeParen - tagEnd <= 24 then
+								tagEnd = closeParen
+							end
+						end
+						if tagEnd < stopAt and text:sub(tagEnd + 1, tagEnd + 1) == ":" then
+							tagEnd = tagEnd + 1
+						end
+						if mStart > cursor then
+							out[#out + 1] = { kind = "comment", first = cursor, last = mStart - 1 }
+						end
+						out[#out + 1] = { kind = tagKind, first = mStart, last = tagEnd }
+						cursor = tagEnd + 1
+						scanPos = cursor
+					else
+						scanPos = mEnd + 1
+					end
+				end
+				if cursor <= stopAt then
+					out[#out + 1] = { kind = "comment", first = cursor, last = stopAt }
+				end
+			end
+		end
+		return out
+	end
+
 	function M.scan(source, langId, previous)
 		local cleanLang = languages.get(langId).id
 		if previous and previous.source == source and previous.langId == cleanLang then
@@ -304,23 +375,36 @@ return function(env)
 				result.spans[i] = previous.spans[oldIndex]
 				state = previous.states[oldIndex]
 			else
-				result.spans[i], state = M.line(lines[i], state, cleanLang)
+				local rawSpans
+				rawSpans, state = M.line(lines[i], state, cleanLang)
+				result.spans[i] = splitCommentTodoSpans(lines[i], rawSpans)
 			end
 			result.states[i] = state
 		end
 		return result
 	end
 
+	local TODO_RICH_COLORS = {
+		todo_tag = "#ffcc00",
+		todo_fixme = "#f14c4c",
+		todo_note = "#4fc1ff",
+	}
+
 	function M.rich(line, spans, colors)
 		if #line == 0 then return "" end
 		local out = {}
 		for _, span in ipairs(spans or {}) do
 			local seg = util.escapeRichText(line:sub(span.first, span.last))
-			local hex = colors and colors[span.kind]
-			if hex and span.kind ~= "text" then
-				out[#out + 1] = '<font color="' .. hex .. '">' .. seg .. "</font>"
+			local todoHex = TODO_RICH_COLORS[span.kind]
+			if todoHex then
+				out[#out + 1] = '<b><font color="' .. todoHex .. '">' .. seg .. "</font></b>"
 			else
-				out[#out + 1] = seg
+				local hex = colors and colors[span.kind]
+				if hex and span.kind ~= "text" then
+					out[#out + 1] = '<font color="' .. hex .. '">' .. seg .. "</font>"
+				else
+					out[#out + 1] = seg
+				end
 			end
 		end
 		return table.concat(out)
