@@ -1,11 +1,16 @@
--- Viewport observer & safe usable-area calculator powering VS-RBLX's auto-resized window.
+-- Viewport observer, touch/mobile detector & keyboard-aware usable-area calculator
+-- powering VS-RBLX's auto-resized window and Acode Mobile Mode.
 return function(env)
 	local signal = env.require("runtime/signal")
+	local config = env.require("runtime/config")
 	local dispose = env.require("runtime/dispose")
 
 	local M = {
 		viewport = Vector2.new(1280, 720),
 		compact = false,
+		touch = false,
+		keyboardOpen = false,
+		keyboardHeight = 0,
 		changed = signal.new("responsive.changed"),
 	}
 
@@ -17,7 +22,23 @@ return function(env)
 		if cam and cam.ViewportSize and cam.ViewportSize.X > 0 and cam.ViewportSize.Y > 0 then
 			M.viewport = cam.ViewportSize
 		end
+		M.touch = (env.uis ~= nil and env.uis.TouchEnabled == true)
 		M.compact = M.viewport.X < 860 or M.viewport.Y < 540
+	end
+
+	function M.isTouchDevice()
+		readViewport()
+		return M.touch
+	end
+
+	function M.setVirtualKeyboard(openFlag, customHeight)
+		M.keyboardOpen = openFlag == true
+		if M.keyboardOpen then
+			M.keyboardHeight = tonumber(customHeight) or math.floor(M.viewport.Y * 0.34)
+		else
+			M.keyboardHeight = 0
+		end
+		M.changed:fire(M.viewport)
 	end
 
 	local function bindCamera()
@@ -48,6 +69,26 @@ return function(env)
 		end)
 	end
 
+	-- Listen to Roblox TextBox focus events on touch devices for keyboard-aware viewport adjustment
+	if env.uis then
+		pcall(function()
+			if env.uis.TextBoxFocused then
+				dispose.connection(env.uis.TextBoxFocused:Connect(function()
+					if env.uis.TouchEnabled == true and env.uis.KeyboardEnabled ~= true then
+						M.setVirtualKeyboard(true)
+					end
+				end))
+			end
+			if env.uis.TextBoxFocusReleased then
+				dispose.connection(env.uis.TextBoxFocusReleased:Connect(function()
+					if M.keyboardOpen then
+						M.setVirtualKeyboard(false)
+					end
+				end))
+			end
+		end)
+	end
+
 	function M.usableRect(margin)
 		readViewport()
 		local pad = tonumber(margin) or 8
@@ -58,15 +99,18 @@ return function(env)
 				topInset = math.max(0, insetTop.Y)
 			end
 		end
+		local cfgKb = tonumber(config.get("mobile.keyboardInset", 0)) or 0
+		local kbReserve = math.max(M.keyboardHeight, cfgKb)
 		local x = pad
 		local y = pad
-		local w = math.max(360, M.viewport.X - pad * 2)
-		local h = math.max(260, M.viewport.Y - topInset - pad * 2)
+		local w = math.max(300, M.viewport.X - pad * 2)
+		local h = math.max(220, M.viewport.Y - topInset - kbReserve - pad * 2)
 		return {
 			x = x,
 			y = y,
 			width = w,
 			height = h,
+			keyboardHeight = kbReserve,
 			viewportX = M.viewport.X,
 			viewportY = M.viewport.Y - topInset,
 		}

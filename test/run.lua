@@ -62,7 +62,7 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 77, "All 77 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 80, "All 80 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
 
 	local gui = H.screen()
@@ -589,7 +589,131 @@ check("8. Combined Sprint 3: Multi-Session Terminal, Roblox LogService & Eyedrop
 	assertEq(api.config.get("editor.tabSize"), 2, "Saving .vsrblx/settings.json live-synced config.editor.tabSize = 2!")
 end)
 
-check("9. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+check("9. Combined Sprint 4 + Sprint 5: Multi-Language Live Split Preview Engine & Mobile Acode Mode", function()
+	-- (A) Language-Gated Preview Eligibility (Included on previewable, strictly omitted on non-previewable)
+	for _, yesLang in ipairs({ "html", "css", "markdown", "json", "yaml", "sql", "python", "javascript", "typescript" }) do
+		assertTrue(api.languages.isPreviewable(yesLang) == true, yesLang .. " supports live preview")
+	end
+	for _, noLang in ipairs({ "luau", "rust", "go", "cpp", "csharp", "java", "shell", "plaintext" }) do
+		assertTrue(api.languages.isPreviewable(noLang) == false, noLang .. " omits live preview")
+	end
+
+	-- Opening a Luau or Rust file hides `OpenPreviewBtn_primary` and refuses `preview.openToSide`
+	api.writeFile("src/engine.rs", "fn main() { println!(\"no preview\"); }\n")
+	api.openFile("src/engine.rs")
+	assertEq(H.byName("OpenPreviewBtn_primary").Visible, false, "Preview button hidden on Rust (.rs) file")
+	local okNoPrev, resNoPrev = api.openPreview()
+	assertTrue(okNoPrev and resNoPrev == false, "openPreview() cleanly declined on non-previewable language")
+	assertEq(H.byName("LivePreviewPane").Visible, false, "LivePreviewPane stays hidden on Rust")
+
+	-- (B) Live HTML + Workspace `style.css` Split Preview (with live CSS edit sync!)
+	api.writeFile("web/style.css", "body { background-color: #0f172a; color: #f8fafc; }\n.hero { background: #2563eb; color: #ffffff; padding: 14px; border-radius: 8px; }\nbutton { background: #22c55e; color: #111827; }\n")
+	api.writeFile("web/index.html", table.concat({
+		"<!DOCTYPE html>",
+		"<html><head><title>RBLX Web UI</title><link rel=\"stylesheet\" href=\"style.css\"></head>",
+		"<body>",
+		"  <h1>Welcome to Live HTML Preview</h1>",
+		"  <div class=\"hero\">Styled by live style.css!</div>",
+		"  <button>Deploy Build</button>",
+		"</body></html>",
+	}, "\n"))
+	local htmlDoc = api.openFile("web/index.html")
+	assertTrue(H.byName("OpenPreviewBtn_primary").Visible == true, "Preview button shown on HTML file")
+	H.click(H.byName("OpenPreviewBtn_primary"))
+	assertTrue(H.byName("LivePreviewPane").Visible == true, "LivePreviewPane opened to the side")
+	local htmlSurf = H.byName("HtmlPreviewSurface")
+	assertTrue(htmlSurf ~= nil, "HtmlPreviewSurface rendered")
+	assertEq(htmlSurf.BackgroundColor3:ToHex(), "0f172a", "HTML surface applied body background #0f172a from style.css")
+
+	-- Edit `web/style.css` on disk and re-activate HTML -> preview cascades new CSS color immediately!
+	api.writeFile("web/style.css", "body { background-color: #1e1b4b; color: #f8fafc; }\n")
+	api.codeStore.activate(htmlDoc.id, "primary")
+	api.app.previewPane.render(htmlDoc)
+	assertEq(H.byName("HtmlPreviewSurface").BackgroundColor3:ToHex(), "1e1b4b", "Live CSS change updated HTML preview background to #1e1b4b")
+
+	-- (C) CSS Design System Preview, Markdown GFM Preview, JSON/YAML Tree, SQL Table & Python/TS Quick-Eval
+	api.openFile("web/style.css")
+	assertTrue(H.byName("CssSwatchGrid") ~= nil, "CSS preview rendered extracted color swatch palette")
+
+	api.writeFile("docs/guide.md", "# Sprint Guide\n- [x] Ship Preview\n| Lang | Live |\n|---|---|\n| HTML | Yes |\n```luau\nlocal ok = true\n```\n")
+	api.openFile("docs/guide.md")
+	assertTrue(H.byName("MdHeading_1") ~= nil and H.byName("MdTable_3") ~= nil and H.byName("MdCodeFence_4") ~= nil,
+		"Markdown preview rendered GFM heading, table, and syntax-colored code fence")
+
+	api.writeFile("config/app.json", '{"app":"VS-RBLX","features":["preview","mobile"],"port":8080}')
+	api.openFile("config/app.json")
+	assertTrue(H.byName("TreeNode_root") ~= nil, "JSON preview rendered interactive collapsible tree")
+
+	api.writeFile("db/schema.sql", table.concat({
+		"CREATE TABLE players (id INT, username TEXT, score INT);",
+		"INSERT INTO players VALUES (1, 'Builderman', 950), (2, 'Guest', 420);",
+		"SELECT username, score FROM players WHERE score > 500;",
+	}, "\n"))
+	api.openFile("db/schema.sql")
+	local sqlGrid = H.byName("SqlResultGrid_1")
+	assertTrue(sqlGrid ~= nil, "SQL preview executed CREATE/INSERT/SELECT and rendered result table")
+
+	api.writeFile("scripts/calc.py", "base = 21\ndoubled = base * 2\nprint(f'Computed={doubled}')\n")
+	api.openFile("scripts/calc.py")
+	assertTrue(H.byName("ScriptEvalOutputCard") ~= nil and H.byName("ScriptEvalVarsCard") ~= nil,
+		"Python quick-eval preview rendered stdout (`Computed=42`) & variable table")
+
+	-- Switching back to a Luau file automatically hides LivePreviewPane & preview button!
+	api.openFile("src/main.luau")
+	assertEq(H.byName("OpenPreviewBtn_primary").Visible, false, "Preview button hidden when switching back to Luau")
+	assertEq(H.byName("LivePreviewPane").Visible, false, "LivePreviewPane hidden when active tab is Luau")
+
+	-- (D) Mobile "Acode" Mode: Manual Toggle, 42px Touch Tabs, `☰` Slide-Over Drawer, Quick-Keys & Play-While-Coding
+	assertEq(api.isMobileMode(), false, "Starts in Desktop mode on desktop viewport")
+	api.setMobileMode(true)
+	assertTrue(api.isMobileMode() == true, "Switched to Acode Mobile Mode manually")
+	assertEq(H.byName("MobileDrawerBtn").Visible, true, "`☰` MobileDrawerBtn visible in TitleBar")
+	assertEq(H.byName("TabBar_primary").Size.Y.Offset, 42, "Touch-friendly 42px TabBar active in Mobile Mode")
+	assertEq(H.byName("MobileQuickKeysBar").Visible, true, "Acode Quick-Keys symbol bar visible")
+	assertEq(H.byName("ActivityBar").Visible, false, "Desktop ActivityBar collapsed into slide-over drawer")
+
+	-- Open `☰` Slide-Over Drawer -> switch to Search -> tap backdrop to dismiss
+	H.click(H.byName("MobileDrawerBtn"))
+	assertEq(H.byName("PrimarySideBar").Visible, true, "Slide-over drawer opened on `☰` tap")
+	assertEq(H.byName("MobileDrawerBackdrop").Visible, true, "Drawer backdrop visible")
+	H.click(H.byName("DrawerTab_search"))
+	assertEq(api.app.viewlets.search.root.Visible, true, "Switched drawer viewlet to Search via touch pill")
+	H.click(H.byName("MobileDrawerBackdrop"))
+	assertEq(H.byName("PrimarySideBar").Visible, false, "Tapping backdrop dismissed slide-over drawer")
+
+	-- Tap Acode Quick-Key `{` to insert symbol at cursor
+	api.writeFile("src/mobile_edit.luau", "local tbl = ")
+	local mobDoc = api.openFile("src/mobile_edit.luau", { reloadFromDisk = true })
+	api.app.primaryEditor.box.CursorPosition = #mobDoc.content + 1
+	api.app.primaryEditor.box.SelectionStart = -1
+	H.click(H.byName("QuickKey_lbrace"))
+	assertEq(mobDoc.content, "local tbl = {", "Acode Quick-Key `{` inserted `{` at cursor")
+
+	-- Keyboard-aware viewport shrink & Play-While-Coding split-peek dock
+	api.responsive.setVirtualKeyboard(true, 220)
+	assertTrue(H.byName("VSCodeWindow").Size.Y.Offset <= 900 - 220, "Window shrunk above virtual on-screen keyboard")
+	api.responsive.setVirtualKeyboard(false)
+
+	H.click(H.byName("QuickKey_play"))
+	assertTrue(api.app.window.playWhileCoding == true, "Play-While-Coding split-peek activated")
+	assertTrue(H.byName("VSCodeWindow").Position.X.Offset > 400, "Window docked to right half leaving left gameplay area open")
+	assertTrue(api.getOpacity() <= 0.75, "Play-While-Coding enabled translucent Ghost opacity")
+	H.click(H.byName("QuickKey_play"))
+	api.setMobileMode(false)
+	assertEq(api.isMobileMode(), false, "Switched back to Desktop mode anytime")
+
+	-- (E) Android / Touch Device Auto-Detection + Switch Prompt on First Boot
+	local HMobile = mockEnv.new({ width = 844, height = 390, touch = true })
+	local mobApi, mErr = HMobile.boot("dist/vsrblx.lua")
+	assertTrue(mobApi ~= nil, "Booted on simulated Android touch viewport: " .. tostring(mErr))
+	local promptModal = HMobile.byName("ConfirmModal")
+	assertTrue(promptModal ~= nil, "Touch device auto-surfaced Acode Mobile Mode switch prompt!")
+	HMobile.click(HMobile.byName("ConfirmPrimaryBtn"))
+	assertTrue(mobApi.isMobileMode() == true, "Accepting prompt switched player straight into Acode Mobile Mode!")
+	mobApi.destroy()
+end)
+
+check("10. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
 	-- Re-running the same build toggles visibility and returns existing handle
 	local secondChunk = assert(H.sandbox.loadstring(
 		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',

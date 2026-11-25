@@ -24,11 +24,14 @@ return function(env)
 			visible = true,
 			minimised = false,
 			maximised = config.get("window.maximised", false) == true,
+			mobileMode = false,
+			playWhileCoding = config.get("mobile.playWhileCoding", false) == true,
 			opacity = initOpacity,
 			opacityChanged = signal.new("window.opacityChanged"),
 			snappedSide = nil,
 			onResize = nil,
 		}
+		local prePlayOpacity = nil
 
 		local root = P.frame(parentScreen, {
 			name = "VSCodeWindow",
@@ -93,11 +96,20 @@ return function(env)
 		end
 
 		function win.applyLayout(reason)
-			local bounds = responsive.usableRect(win.maximised and 0 or 8)
-			local effMinW = math.min(MIN_W, bounds.width)
-			local effMinH = math.min(MIN_H, bounds.height)
+			local isMobFull = win.mobileMode and not win.playWhileCoding
+			local bounds = responsive.usableRect((win.maximised or isMobFull) and 0 or 8)
+			local minW = win.mobileMode and 300 or MIN_W
+			local minH = win.mobileMode and 220 or MIN_H
+			local effMinW = math.min(minW, bounds.width)
+			local effMinH = math.min(minH, bounds.height)
 
-			if win.maximised then
+			if win.playWhileCoding then
+				-- Play-While-Coding Split Peek: docks to the right ~52% so the left half stays open for thumbstick & gameplay!
+				local dockW = math.max(effMinW, math.floor(bounds.width * 0.52))
+				local dockH = math.max(effMinH, math.floor(bounds.height * 0.94))
+				root.Position = UDim2.fromOffset(bounds.x + bounds.width - dockW, bounds.y)
+				root.Size = UDim2.fromOffset(dockW, dockH)
+			elseif win.maximised or isMobFull then
 				root.Position = UDim2.fromOffset(bounds.x, bounds.y)
 				root.Size = UDim2.fromOffset(bounds.width, bounds.height)
 			elseif win.snappedSide == "left" then
@@ -386,6 +398,30 @@ return function(env)
 
 		function win.stepOpacity(delta)
 			return win.setOpacity(win.opacity + (tonumber(delta) or 0))
+		end
+
+		function win.setMobileMode(flag)
+			win.mobileMode = flag == true
+			pill.Size = flag and UDim2.fromOffset(148, 40) or UDim2.fromOffset(128, 32)
+			pillBrand.Position = UDim2.fromOffset(12, flag and 12 or 8)
+			win.applyLayout("mobileMode")
+		end
+
+		function win.setPlayWhileCoding(flag)
+			local nextPlay = flag == true
+			win.playWhileCoding = nextPlay
+			config.set("mobile.playWhileCoding", nextPlay, { immediate = true })
+			if nextPlay then
+				if win.opacity > 0.80 then
+					prePlayOpacity = win.opacity
+					win.setOpacity(0.72)
+				end
+			elseif prePlayOpacity then
+				win.setOpacity(prePlayOpacity)
+				prePlayOpacity = nil
+			end
+			win.applyLayout("playWhileCoding")
+			return nextPlay
 		end
 
 		function win.resetAutoSize()

@@ -3,6 +3,8 @@ return function(env)
 	local fsx = env.require("runtime/fsx")
 	local config = env.require("runtime/config")
 	local workspaceFs = env.require("runtime/workspace_fs")
+	local languages = env.require("runtime/languages")
+	local previewEngine = env.require("runtime/preview_engine")
 	local codeStore = env.require("runtime/code_store")
 	local codeDiff = env.require("runtime/code_diff")
 	local todoScanner = env.require("runtime/todo_scanner")
@@ -15,6 +17,7 @@ return function(env)
 	local gitState = env.require("runtime/git_state")
 	local commands = env.require("runtime/command_catalog")
 	local theme = env.require("ui/theme")
+	local responsive = env.require("ui/responsive")
 	local githubSync = env.require("tools/github_sync")
 	local execution = env.require("tools/execution")
 	local terminalCmds = env.require("tools/terminal_cmds")
@@ -35,6 +38,9 @@ return function(env)
 			fs = fsx,
 			config = config,
 			workspace = workspaceFs,
+			languages = languages,
+			previewEngine = previewEngine,
+			responsive = responsive,
 			codeStore = codeStore,
 			editor = codeStore,
 			codeDiff = codeDiff,
@@ -54,6 +60,8 @@ return function(env)
 			openFile = function(path, opts) return codeStore.openFile(path, opts) end,
 			writeFile = function(path, content) return workspaceFs.writeFile(path, content) end,
 			readFile = function(path) return workspaceFs.readFile(path) end,
+			openPreview = function() return commands.run("preview.openToSide") end,
+			closePreview = function() return commands.run("preview.close") end,
 			bundleWorkspace = function(outPath) return projectBundler.bundleWorkspace(outPath) end,
 			cloneRepo = function(repo, opts) return githubSync.cloneRepo(repo, opts) end,
 			pullRepo = function() return githubSync.pull() end,
@@ -71,6 +79,14 @@ return function(env)
 			getOpacity = function()
 				if app and app.window then return app.window.getOpacity() end
 				return 1.0
+			end,
+			setMobileMode = function(flag)
+				if app and app.setMobileMode then return app.setMobileMode(flag) end
+				return false
+			end,
+			isMobileMode = function()
+				if app and app.isMobileMode then return app.isMobileMode() end
+				return false
 			end,
 			toggleZenMode = function() return commands.run("workbench.toggleZenMode") end,
 			show = function() if app and app.window then app.window.show() end end,

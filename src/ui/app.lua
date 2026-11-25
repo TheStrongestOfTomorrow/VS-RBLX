@@ -8,11 +8,14 @@ return function(env)
 	local titlebarMod = env.require("ui/titlebar")
 	local activitybarMod = env.require("ui/activitybar")
 	local statusbarMod = env.require("ui/statusbar")
+	local responsive = env.require("ui/responsive")
+	local mobileBarMod = env.require("ui/mobile_bar")
 	local commandPaletteMod = env.require("ui/command_palette")
 
 	local tabsMod = env.require("ui/code/tabs")
 	local breadcrumbsMod = env.require("ui/code/breadcrumbs")
 	local editorMod = env.require("ui/code/editor")
+	local previewPaneMod = env.require("ui/code/preview_pane")
 	local splitterMod = env.require("ui/code/splitter")
 	local terminalMod = env.require("ui/code/terminal")
 
@@ -29,6 +32,8 @@ return function(env)
 	local config = env.require("runtime/config")
 	local bootProgress = env.require("runtime/boot_progress")
 	local workspaceFs = env.require("runtime/workspace_fs")
+	local languages = env.require("runtime/languages")
+	local previewEngine = env.require("runtime/preview_engine")
 	local codeStore = env.require("runtime/code_store")
 	local clipboard = env.require("runtime/clipboard")
 	local sessionJournal = env.require("runtime/session_journal")
@@ -118,13 +123,22 @@ return function(env)
 		local activeViewlet = tostring(config.get("workbench.activeViewlet", "explorer"))
 		local zenMode = config.get("workbench.zenMode", false) == true
 		local preZenState = nil
+		local previewOpen = false
+		local mobileMode = tostring(config.get("mobile.mode", "auto")) == "on"
+		local drawerOpen = false
 
-		-- TitleBar (bound to window drag + opacity scrub + maximize/minimize/close controls)
+		local reflowWorkbench
+
+		-- TitleBar (bound to window drag + opacity scrub + mobile drawer + maximize/minimize/close controls)
 		local titleBar = titlebarMod.new(win.body, {
 			onMinimize = function() win.minimise() end,
 			onMaximize = function() win.toggleMaximise() end,
 			onClose = function() win.hide() end,
 			onSetOpacity = function(alpha) win.setOpacity(alpha) end,
+			onToggleDrawer = function()
+				drawerOpen = not drawerOpen
+				if reflowWorkbench then reflowWorkbench() end
+			end,
 		})
 		win.bindDragBar(titleBar.root)
 
@@ -142,7 +156,23 @@ return function(env)
 			zIndex = 11,
 		})
 
-		-- Primary Sidebar Container
+		-- Tap-to-dismiss backdrop when Acode Mobile Slide-Over Drawer is open
+		local drawerBackdrop = P.button(workbenchBody, {
+			name = "MobileDrawerBackdrop",
+			size = UDim2.fromScale(1, 1),
+			bg = Color3.fromRGB(0, 0, 0),
+			hoverBg = Color3.fromRGB(0, 0, 0),
+			transparency = 0.45,
+			text = "",
+			visible = false,
+			zIndex = 50,
+			onClick = function()
+				drawerOpen = false
+				if reflowWorkbench then reflowWorkbench() end
+			end,
+		})
+
+		-- Primary Sidebar Container (acts as Slide-Over Drawer in Acode Mobile Mode)
 		local sideBarFrame = P.frame(workbenchBody, {
 			name = "PrimarySideBar",
 			size = UDim2.new(0, sideBarWidth, 1, 0),
@@ -158,14 +188,32 @@ return function(env)
 			zIndex = 25,
 		})
 
+		-- Mobile Drawer Top Switcher Strip (shown inside Sidebar when Mobile Mode is active)
+		local drawerNav = P.frame(sideBarFrame, {
+			name = "MobileDrawerNav",
+			size = UDim2.new(1, -1, 0, 34),
+			bg = theme.color.activityBar,
+			visible = false,
+			zIndex = 58,
+		})
+		P.pad(drawerNav, 3, 6, 3, 6)
+		P.list(drawerNav, Enum.FillDirection.Horizontal, 4, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+
+		local viewletHost = P.frame(sideBarFrame, {
+			name = "SideBarViewletHost",
+			size = UDim2.fromScale(1, 1),
+			transparency = 1,
+			zIndex = 21,
+		})
+
 		-- Viewlets inside Primary Sidebar
 		local viewlets = {
-			explorer = explorerPanel.new(sideBarFrame),
-			search = searchPanel.new(sideBarFrame),
-			scm = scmPanel.new(sideBarFrame),
-			debug = debugPanel.new(sideBarFrame),
-			extensions = extensionsPanel.new(sideBarFrame),
-			settings = settingsPanel.new(sideBarFrame),
+			explorer = explorerPanel.new(viewletHost),
+			search = searchPanel.new(viewletHost),
+			scm = scmPanel.new(viewletHost),
+			debug = debugPanel.new(viewletHost),
+			extensions = extensionsPanel.new(viewletHost),
+			settings = settingsPanel.new(viewletHost),
 		}
 
 		-- Main Center Stack (transparent wrapper over EditorsRegion + BottomPanelContainer)
@@ -227,6 +275,20 @@ return function(env)
 		})
 		local secondaryEditor = editorMod.new(secondaryBody, "secondary")
 
+		-- Live Split Preview Pane (for previewable languages ONLY: HTML+CSS, Markdown, CSS, JSON/YAML, SQL, Python/JS/TS)
+		local previewPane = previewPaneMod.new(editorsRegion, {
+			onClose = function()
+				previewOpen = false
+				if reflowWorkbench then reflowWorkbench() end
+			end,
+		})
+
+		-- Acode Mobile Quick-Keys Bar (1-tap symbols + Undo/Redo + Play+Code + Run)
+		local mobileQuickBar = mobileBarMod.new(mainArea, function(sym)
+			local targetEd = codeStore.focusedPane == "secondary" and secondaryEditor or primaryEditor
+			targetEd.runAction("insertText", sym)
+		end)
+
 		-- Floating Zen Mode Exit Pill inside EditorsRegion
 		local zenExitPill = P.button(editorsRegion, {
 			name = "ZenExitPill",
@@ -256,8 +318,6 @@ return function(env)
 			zIndex = 20,
 		})
 
-		local reflowWorkbench
-
 		local bottomTerminal = terminalMod.new(panelHolder, function()
 			panelVisible = false
 			config.set("workbench.panelVisible", false, { quiet = true })
@@ -285,30 +345,68 @@ return function(env)
 		end)
 
 		local actBar
+		local drawerPillBtns = {}
 
 		reflowWorkbench = function()
-			local showStatus = not zenMode
+			local effTitleH = mobileMode and 38 or TITLE_H
+			local effTabH = mobileMode and 42 or TAB_H
+			local showStatus = (not zenMode) and (not mobileMode)
 			statusBar.root.Visible = showStatus
-			workbenchBody.Position = UDim2.fromOffset(0, TITLE_H)
-			workbenchBody.Size = UDim2.new(1, 0, 1, -(TITLE_H + (showStatus and STATUS_H or 0)))
+			workbenchBody.Position = UDim2.fromOffset(0, effTitleH)
+			workbenchBody.Size = UDim2.new(1, 0, 1, -(effTitleH + (showStatus and STATUS_H or 0)))
 
-			local showAct = not zenMode
+			primaryBreadcrumbs.root.Position = UDim2.fromOffset(0, effTabH)
+			primaryBody.Position = UDim2.fromOffset(0, effTabH + CRUMB_H)
+			primaryBody.Size = UDim2.new(1, 0, 1, -(effTabH + CRUMB_H))
+			secondaryBreadcrumbs.root.Position = UDim2.fromOffset(0, effTabH)
+			secondaryBody.Position = UDim2.fromOffset(0, effTabH + CRUMB_H)
+			secondaryBody.Size = UDim2.new(1, 0, 1, -(effTabH + CRUMB_H))
+
+			local showAct = (not zenMode) and (not mobileMode)
 			if actBar then
 				actBar.root.Visible = showAct
 			end
 			local effActW = showAct and ACT_W or 0
 
-			local showSide = (not zenMode) and sideBarVisible
-			local effSideW = showSide and sideBarWidth or 0
-			sideBarFrame.Visible = showSide
-			sideBarFrame.Position = UDim2.fromOffset(effActW, 0)
-			sideBarFrame.Size = UDim2.new(0, sideBarWidth, 1, 0)
-			sideSash.Visible = showSide
-			sideSash.Position = UDim2.fromOffset(effActW + sideBarWidth - 2, 0)
+			if mobileMode then
+				-- Acode Slide-Over Drawer mode: overlays on top of the editor when `drawerOpen == true`
+				local drawerW = math.min(290, math.max(220, workbenchBody.AbsoluteSize.X - 36))
+				local showDrawer = (not zenMode) and drawerOpen
+				drawerBackdrop.Visible = showDrawer
+				sideBarFrame.Visible = showDrawer
+				sideBarFrame.ZIndex = 55
+				sideBarFrame.Position = UDim2.fromOffset(0, 0)
+				sideBarFrame.Size = UDim2.new(0, drawerW, 1, 0)
+				drawerNav.Visible = true
+				viewletHost.Position = UDim2.fromOffset(0, 34)
+				viewletHost.Size = UDim2.new(1, 0, 1, -34)
+				sideSash.Visible = false
 
-			local leftOffset = effActW + effSideW
-			mainArea.Position = UDim2.fromOffset(leftOffset, 0)
-			mainArea.Size = UDim2.new(1, -leftOffset, 1, 0)
+				mainArea.Position = UDim2.fromOffset(0, 0)
+				mainArea.Size = UDim2.fromScale(1, 1)
+			else
+				drawerBackdrop.Visible = false
+				drawerNav.Visible = false
+				sideBarFrame.ZIndex = 20
+				viewletHost.Position = UDim2.fromOffset(0, 0)
+				viewletHost.Size = UDim2.fromScale(1, 1)
+
+				local showSide = (not zenMode) and sideBarVisible
+				local effSideW = showSide and sideBarWidth or 0
+				sideBarFrame.Visible = showSide
+				sideBarFrame.Position = UDim2.fromOffset(effActW, 0)
+				sideBarFrame.Size = UDim2.new(0, sideBarWidth, 1, 0)
+				sideSash.Visible = showSide
+				sideSash.Position = UDim2.fromOffset(effActW + sideBarWidth - 2, 0)
+
+				local leftOffset = effActW + effSideW
+				mainArea.Position = UDim2.fromOffset(leftOffset, 0)
+				mainArea.Size = UDim2.new(1, -leftOffset, 1, 0)
+			end
+
+			local showQuickBar = mobileMode and (config.get("mobile.quickKeys", true) ~= false)
+			local effQuickH = showQuickBar and mobileQuickBar.height or 0
+			mobileQuickBar.root.Visible = showQuickBar
 
 			local showPanel = (not zenMode) and panelVisible
 			local effPanelH = showPanel and panelHeight or 0
@@ -316,14 +414,30 @@ return function(env)
 			panelHolder.Size = UDim2.new(1, 0, 0, effPanelH)
 			panelHolder.Position = UDim2.new(0, 0, 1, -effPanelH)
 
+			if showQuickBar then
+				mobileQuickBar.root.Position = UDim2.new(0, 0, 1, -(effPanelH + effQuickH))
+			end
+
 			panelSash.Visible = showPanel
 			panelSash.Position = UDim2.new(0, 0, 1, -effPanelH - 2)
 
 			editorsRegion.Position = UDim2.fromOffset(0, 0)
-			editorsRegion.Size = UDim2.new(1, 0, 1, -effPanelH)
+			editorsRegion.Size = UDim2.new(1, 0, 1, -(effPanelH + effQuickH))
 			zenExitPill.Visible = zenMode
 
-			if codeStore.splitOpen then
+			local curPrimaryDoc = codeStore.active("primary")
+			local canShowPreview = previewOpen and (curPrimaryDoc ~= nil) and languages.isPreviewable(curPrimaryDoc)
+
+			if canShowPreview then
+				primaryGroup.Size = UDim2.new(splitRatio, 0, 1, 0)
+				secondaryGroup.Visible = false
+				previewPane.root.Visible = true
+				previewPane.root.Position = UDim2.new(splitRatio, 0, 0, 0)
+				previewPane.root.Size = UDim2.new(1 - splitRatio, 0, 1, 0)
+				editorSplitSash.Visible = true
+				editorSplitSash.Position = UDim2.new(splitRatio, -2, 0, 0)
+			elseif codeStore.splitOpen then
+				previewPane.root.Visible = false
 				primaryGroup.Size = UDim2.new(splitRatio, 0, 1, 0)
 				secondaryGroup.Visible = true
 				secondaryGroup.Position = UDim2.new(splitRatio, 0, 0, 0)
@@ -331,6 +445,7 @@ return function(env)
 				editorSplitSash.Visible = true
 				editorSplitSash.Position = UDim2.new(splitRatio, -2, 0, 0)
 			else
+				previewPane.root.Visible = false
 				primaryGroup.Size = UDim2.fromScale(1, 1)
 				secondaryGroup.Visible = false
 				editorSplitSash.Visible = false
@@ -361,22 +476,106 @@ return function(env)
 			if zenMode then
 				setZenMode(false)
 			end
-			if toggleIfSame and sideBarVisible and activeViewlet == id then
-				sideBarVisible = false
-			else
+			if mobileMode then
 				activeViewlet = id
-				sideBarVisible = true
+				drawerOpen = true
+			else
+				if toggleIfSame and sideBarVisible and activeViewlet == id then
+					sideBarVisible = false
+				else
+					activeViewlet = id
+					sideBarVisible = true
+				end
 			end
 			for k, v in pairs(viewlets) do
 				v.root.Visible = (k == activeViewlet)
+			end
+			for vid, b in pairs(drawerPillBtns) do
+				b.BackgroundColor3 = (vid == activeViewlet) and theme.color.accent or theme.color.inputBg
+				b.TextColor3 = (vid == activeViewlet) and Color3.fromRGB(255, 255, 255) or theme.color.sideBarText
 			end
 			config.set("workbench.activeViewlet", activeViewlet)
 			config.set("workbench.sideBarVisible", sideBarVisible)
 			if actBar then actBar.refresh() end
 			reflowWorkbench()
-			if sideBarVisible and id == "search" and viewlets.search.focus then
+			if (sideBarVisible or drawerOpen) and id == "search" and viewlets.search.focus then
 				viewlets.search.focus()
 			end
+		end
+
+		-- Populate Mobile Drawer Viewlet Switcher Pills (`Files`, `Search`, `Git`, `Run`, `Ext`, `⚙`, `>`)
+		local DRAWER_TABS = {
+			{ id = "explorer", label = "Files" },
+			{ id = "search", label = "Search" },
+			{ id = "scm", label = "Git" },
+			{ id = "debug", label = "Run" },
+			{ id = "extensions", label = "Ext" },
+			{ id = "settings", label = "⚙" },
+		}
+		for idx, dSpec in ipairs(DRAWER_TABS) do
+			local db = P.button(drawerNav, {
+				name = "DrawerTab_" .. dSpec.id,
+				size = UDim2.fromOffset(#dSpec.label * 6 + 18, 26),
+				bg = (dSpec.id == activeViewlet) and theme.color.accent or theme.color.inputBg,
+				hoverBg = theme.color.hover,
+				color = (dSpec.id == activeViewlet) and Color3.fromRGB(255, 255, 255) or theme.color.sideBarText,
+				bold = true,
+				text = dSpec.label,
+				textSize = 11,
+				radius = 5,
+				order = idx,
+				zIndex = 59,
+				onClick = function()
+					selectViewlet(dSpec.id, false)
+				end,
+			})
+			db.BackgroundTransparency = 0
+			drawerPillBtns[dSpec.id] = db
+		end
+		local cmdPill = P.button(drawerNav, {
+			name = "DrawerCmdPaletteBtn",
+			size = UDim2.fromOffset(30, 26),
+			bg = theme.color.inputBg,
+			hoverBg = theme.color.accent,
+			text = ">_",
+			mono = true,
+			bold = true,
+			textSize = 11,
+			radius = 5,
+			order = 99,
+			zIndex = 59,
+			onClick = function()
+				drawerOpen = false
+				reflowWorkbench()
+				palette.open(">")
+			end,
+		})
+		cmdPill.BackgroundTransparency = 0
+
+		local function setMobileMode(flag, opts)
+			opts = opts or {}
+			mobileMode = flag == true
+			drawerOpen = false
+			if not opts.keepConfig then
+				config.set("mobile.mode", mobileMode and "on" or "off", { immediate = true })
+			end
+			if mobileMode then
+				panelVisible = false
+				config.set("workbench.panelVisible", false, { quiet = true })
+			end
+			titleBar.setMobileMode(mobileMode)
+			primaryTabs.setMobileMode(mobileMode)
+			secondaryTabs.setMobileMode(mobileMode)
+			win.setMobileMode(mobileMode)
+			reflowWorkbench()
+			if not opts.silent then
+				overlay.toast(
+					mobileMode and "📱 Acode Mobile Mode enabled (☰ drawer, 42px tabs & Quick-Keys)" or "Switched to Desktop VS Code Mode",
+					"good",
+					2.6
+				)
+			end
+			return mobileMode
 		end
 
 		actBar = activitybarMod.new(workbenchBody, function(id)
@@ -389,7 +588,7 @@ return function(env)
 			local bgTrans = 1.0 - clamped
 			titleBar.root.BackgroundTransparency = bgTrans
 			actBar.root.BackgroundTransparency = bgTrans
-			sideBarFrame.BackgroundTransparency = bgTrans
+			sideBarFrame.BackgroundTransparency = mobileMode and math.min(0.15, bgTrans) or bgTrans
 			editorsRegion.BackgroundTransparency = bgTrans
 			primaryBreadcrumbs.root.BackgroundTransparency = bgTrans
 			secondaryBreadcrumbs.root.BackgroundTransparency = bgTrans
@@ -398,13 +597,27 @@ return function(env)
 			if secondaryTabs.setTransparency then secondaryTabs.setTransparency(bgTrans) end
 			if primaryEditor.setTransparency then primaryEditor.setTransparency(bgTrans) end
 			if secondaryEditor.setTransparency then secondaryEditor.setTransparency(bgTrans) end
+			if previewPane.setTransparency then previewPane.setTransparency(bgTrans) end
+			if mobileQuickBar.setTransparency then mobileQuickBar.setTransparency(bgTrans) end
 			if bottomTerminal.setTransparency then bottomTerminal.setTransparency(bgTrans) end
 		end
 
 		win.opacityChanged:connect(applyWindowOpacity)
 		applyWindowOpacity(win.opacity)
 
-		codeStore.changed:connect(reflowWorkbench)
+		codeStore.changed:connect(function()
+			-- Auto-close mobile drawer when opening/activating a file so the player sees code immediately!
+			if mobileMode and drawerOpen then
+				drawerOpen = false
+			end
+			local activeDoc = codeStore.active("primary")
+			if previewOpen and activeDoc and languages.isPreviewable(activeDoc) then
+				if config.get("preview.autoRefresh", true) ~= false or previewPane.currentDoc() ~= activeDoc then
+					previewPane.render(activeDoc)
+				end
+			end
+			reflowWorkbench()
+		end)
 		win.onResize = reflowWorkbench
 
 		local function registerCommands()
@@ -691,9 +904,57 @@ return function(env)
 			end, { "edit.format" })
 
 			reg("editor.toggleSplit", "Split Editor Right / Close Split", "View", "Ctrl+\\", function()
+				previewOpen = false
 				codeStore.toggleSplit()
 				reflowWorkbench()
 			end, { "view.splitEditor" })
+
+			reg("preview.openToSide", "Open Live Preview to the Side", "Preview", nil, function()
+				local doc = codeStore.active("primary")
+				if not doc or not languages.isPreviewable(doc) then
+					local lname = doc and languages.get(doc.langId).name or "empty buffer"
+					overlay.toast("Live Preview is not available for " .. lname, "warn", 2.2)
+					return false
+				end
+				if previewOpen and previewPane.currentDoc() == doc and previewPane.root.Visible then
+					previewOpen = false
+					reflowWorkbench()
+					return false
+				end
+				codeStore.splitOpen = false
+				previewOpen = true
+				previewPane.render(doc)
+				reflowWorkbench()
+				return true
+			end, { "markdown.showPreviewToSide", "view.openPreview" })
+
+			reg("preview.close", "Close Live Split Preview", "Preview", nil, function()
+				previewOpen = false
+				reflowWorkbench()
+				return true
+			end)
+
+			reg("workbench.toggleMobileMode", "Toggle Acode Mobile Mode (Touch & Play-While-Coding)", "Mobile", nil, function()
+				return setMobileMode(not mobileMode)
+			end, { "mobile.toggle" })
+
+			reg("mobile.toggleDrawer", "Toggle Mobile Slide-Over Drawer", "Mobile", nil, function()
+				if not mobileMode then setMobileMode(true, { silent = true }) end
+				drawerOpen = not drawerOpen
+				reflowWorkbench()
+				return drawerOpen
+			end)
+
+			reg("mobile.togglePlayWhileCoding", "Toggle Play-While-Coding Split Peek Mode", "Mobile", nil, function()
+				local active = win.setPlayWhileCoding(not win.playWhileCoding)
+				reflowWorkbench()
+				overlay.toast(
+					active and "🎮 Play-While-Coding active (left screen free for gameplay!)" or "Exited Play-While-Coding dock",
+					"good",
+					2.5
+				)
+				return active
+			end)
 
 			reg("editor.toggleMinimap", "Toggle Editor Minimap", "View", nil, function()
 				config.set("editor.minimap", not config.get("editor.minimap", true))
@@ -952,6 +1213,22 @@ return function(env)
 			if key == "*" or key == "keybindings.preset" or key == "keybindings.toggleKey" then
 				shortcuts.applyPreset()
 			end
+			if key == "*" or key == "mobile.mode" then
+				local pref = tostring(config.get("mobile.mode", "auto"))
+				if pref == "on" and not mobileMode then
+					setMobileMode(true, { silent = true, keepConfig = true })
+				elseif pref == "off" and mobileMode then
+					setMobileMode(false, { silent = true, keepConfig = true })
+				end
+			elseif key == "mobile.quickKeys" or key == "mobile.playWhileCoding" then
+				if key == "mobile.playWhileCoding" then
+					local wantPlay = config.get("mobile.playWhileCoding", false) == true
+					if win.playWhileCoding ~= wantPlay then
+						win.setPlayWhileCoding(wantPlay)
+					end
+				end
+				reflowWorkbench()
+			end
 		end)
 
 		registerCommands()
@@ -977,15 +1254,44 @@ return function(env)
 		for k, v in pairs(viewlets) do
 			v.root.Visible = (k == activeViewlet)
 		end
-		reflowWorkbench()
+		if mobileMode then
+			setMobileMode(true, { silent = true, keepConfig = true })
+		else
+			reflowWorkbench()
+		end
+
+		-- Auto-detect Android / touch devices and offer to switch to Acode Mobile Mode!
+		local modeSetting = tostring(config.get("mobile.mode", "auto"))
+		if modeSetting == "auto" and responsive.isTouchDevice() and config.get("mobile.promptedOnce", false) ~= true then
+			overlay.confirm({
+				title = "📱 Touch / Mobile Device Detected",
+				message = "Switch to Acode Mobile Mode (☰ slide-over drawer, 42px touch tabs, Quick-Keys symbol bar & Play-While-Coding)? You can switch back anytime via 📱 in the Title Bar.",
+				primaryText = "Switch to Mobile Mode",
+				secondaryText = "Keep Desktop Mode",
+				cancelText = "Ask Later",
+				onPrimary = function()
+					config.set("mobile.promptedOnce", true, { quiet = true })
+					setMobileMode(true)
+				end,
+				onSecondary = function()
+					config.set("mobile.promptedOnce", true, { quiet = true })
+					config.set("mobile.mode", "off", { immediate = true })
+				end,
+			})
+		end
 
 		theme.changed:connect(function()
 			sideBarFrame.BackgroundColor3 = theme.color.sideBar
+			drawerNav.BackgroundColor3 = theme.color.activityBar
 			sideRightBorder.BackgroundColor3 = theme.color.border
 			editorsRegion.BackgroundColor3 = theme.color.editor
 			splitLeftRule.BackgroundColor3 = theme.color.border
 			zenExitPill.BackgroundColor3 = theme.color.sideBar
 			zenExitPill.TextColor3 = theme.color.tabActiveText
+			for vid, b in pairs(drawerPillBtns) do
+				b.BackgroundColor3 = (vid == activeViewlet) and theme.color.accent or theme.color.inputBg
+				b.TextColor3 = (vid == activeViewlet) and Color3.fromRGB(255, 255, 255) or theme.color.sideBarText
+			end
 			applyWindowOpacity(win.opacity)
 		end)
 
@@ -999,12 +1305,19 @@ return function(env)
 			statusBar = statusBar,
 			viewlets = viewlets,
 			palette = palette,
+			primaryTabs = primaryTabs,
 			primaryEditor = primaryEditor,
 			secondaryEditor = secondaryEditor,
+			previewPane = previewPane,
+			previewEngine = previewEngine,
+			mobileQuickBar = mobileQuickBar,
 			terminal = bottomTerminal,
 			selectViewlet = selectViewlet,
 			setZenMode = setZenMode,
 			isZenMode = function() return zenMode end,
+			setMobileMode = setMobileMode,
+			isMobileMode = function() return mobileMode end,
+			isPreviewOpen = function() return previewOpen and previewPane.root.Visible end,
 		}
 	end
 

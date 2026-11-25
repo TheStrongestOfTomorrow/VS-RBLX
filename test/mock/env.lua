@@ -294,12 +294,14 @@ function M.new(opts)
 
 	local heldKeys = {}
 	local uis = {
-		TouchEnabled = false,
-		MouseEnabled = true,
-		KeyboardEnabled = true,
+		TouchEnabled = opts.touch == true,
+		MouseEnabled = opts.touch ~= true,
+		KeyboardEnabled = opts.touch ~= true,
 		InputBegan = makeSignal(),
 		InputChanged = makeSignal(),
 		InputEnded = makeSignal(),
+		TextBoxFocused = makeSignal(),
+		TextBoxFocusReleased = makeSignal(),
 		GetFocusedTextBox = function() return nil end,
 		IsKeyDown = function(_, kc)
 			local name = type(kc) == "table" and kc.Name or tostring(kc)
