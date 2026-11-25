@@ -5,6 +5,10 @@ return function(env)
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
 	local todoScanner = env.require("runtime/todo_scanner")
+	local clipboard = env.require("runtime/clipboard")
+	local sessionJournal = env.require("runtime/session_journal")
+	local colorUtils = env.require("runtime/color_utils")
+	local editorActions = env.require("runtime/editor_actions")
 	local gitState = env.require("runtime/git_state")
 	local commands = env.require("runtime/command_catalog")
 	local theme = env.require("ui/theme")
@@ -28,6 +32,10 @@ return function(env)
 			codeStore = codeStore,
 			editor = codeStore,
 			todos = todoScanner,
+			clipboard = clipboard,
+			session = sessionJournal,
+			colorUtils = colorUtils,
+			editorActions = editorActions,
 			git = gitState,
 			github = githubSync,
 			theme = theme,

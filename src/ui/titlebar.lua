@@ -70,6 +70,13 @@ return function(env)
 					return {
 						{ label = "Undo", shortcut = "Ctrl+Z", onClick = function() commands.run("edit.undo") end },
 						{ label = "Redo", shortcut = "Ctrl+Y", onClick = function() commands.run("edit.redo") end },
+						{ label = "Clipboard History (15 Slots)...", shortcut = "Ctrl+Shift+V", onClick = function() commands.run("edit.clipboardHistory") end },
+						{ separator = true },
+						{ label = "Toggle Line Comment", shortcut = "Ctrl+/", onClick = function() commands.run("editor.toggleComment") end },
+						{ label = "Duplicate Line Down", shortcut = "Shift+Alt+Down", onClick = function() commands.run("editor.duplicateLineDown") end },
+						{ label = "Move Line Up", shortcut = "Alt+Up", onClick = function() commands.run("editor.moveLineUp") end },
+						{ label = "Move Line Down", shortcut = "Alt+Down", onClick = function() commands.run("editor.moveLineDown") end },
+						{ label = "Delete Line", shortcut = "Ctrl+Shift+K", onClick = function() commands.run("editor.deleteLine") end },
 						{ separator = true },
 						{ label = "Find in File", shortcut = "Ctrl+F", onClick = function() commands.run("edit.find") end },
 						{ label = "Replace in File", shortcut = "Ctrl+H", onClick = function() commands.run("edit.replace") end },
@@ -100,6 +107,7 @@ return function(env)
 						{ label = "Toggle Terminal Panel", shortcut = "Ctrl+J", onClick = function() commands.run("view.togglePanel") end },
 						{ label = "Split Editor Right", shortcut = "Ctrl+\\", onClick = function() commands.run("view.splitEditor") end },
 						{ label = "Toggle Minimap", onClick = function() commands.run("view.toggleMinimap") end },
+						{ label = "Capture Toggle Hotkey...", onClick = function() commands.run("workbench.changeToggleKey") end },
 						{ label = "Reset Auto Window Size", onClick = function() commands.run("window.resetSize") end },
 					}
 				end,

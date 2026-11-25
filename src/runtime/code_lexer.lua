@@ -336,6 +336,72 @@ return function(env)
 		return out
 	end
 
+	local BRACKET_OPEN = { ["("] = true, ["["] = true, ["{"] = true }
+	local BRACKET_CLOSE = { [")"] = "(", ["]"] = "[", ["}"] = "{" }
+	local BRACKET_RICH_COLORS = {
+		bracket1 = "#ffd700",
+		bracket2 = "#da70d6",
+		bracket3 = "#179fff",
+		bracket_bad = "#f14c4c",
+	}
+
+	local function applyRainbowBracketsToLine(text, spans, startDepth)
+		local depth = startDepth or 0
+		if not spans or #spans == 0 then return spans, depth end
+
+		local hasPlain = false
+		for i = 1, #spans do
+			if spans[i].kind == "text" then
+				local slice = text:sub(spans[i].first, spans[i].last)
+				if slice:find("[%(%)%[%]%{%}]") then
+					hasPlain = true
+					break
+				end
+			end
+		end
+		if not hasPlain then
+			return spans, depth
+		end
+
+		local out = {}
+		for idx = 1, #spans do
+			local sp = spans[idx]
+			if sp.kind ~= "text" then
+				out[#out + 1] = sp
+			else
+				local runStart = sp.first
+				for pos = sp.first, sp.last do
+					local ch = text:sub(pos, pos)
+					if BRACKET_OPEN[ch] then
+						if pos > runStart then
+							out[#out + 1] = { kind = "text", first = runStart, last = pos - 1 }
+						end
+						local level = (depth % 3) + 1
+						out[#out + 1] = { kind = "bracket" .. tostring(level), first = pos, last = pos }
+						depth = depth + 1
+						runStart = pos + 1
+					elseif BRACKET_CLOSE[ch] then
+						if pos > runStart then
+							out[#out + 1] = { kind = "text", first = runStart, last = pos - 1 }
+						end
+						if depth > 0 then
+							depth = depth - 1
+							local level = (depth % 3) + 1
+							out[#out + 1] = { kind = "bracket" .. tostring(level), first = pos, last = pos }
+						else
+							out[#out + 1] = { kind = "bracket_bad", first = pos, last = pos }
+						end
+						runStart = pos + 1
+					end
+				end
+				if runStart <= sp.last then
+					out[#out + 1] = { kind = "text", first = runStart, last = sp.last }
+				end
+			end
+		end
+		return out, depth
+	end
+
 	function M.scan(source, langId, previous)
 		local cleanLang = languages.get(langId).id
 		if previous and previous.source == source and previous.langId == cleanLang then
@@ -359,8 +425,10 @@ return function(env)
 			starts = starts,
 			spans = {},
 			states = {},
+			depths = {},
 		}
 		local state = ""
+		local bracketDepth = 0
 		for i = 1, #lines do
 			local oldIndex = nil
 			if previous and previous.langId == cleanLang then
@@ -371,15 +439,19 @@ return function(env)
 				end
 			end
 			local prevEndState = (oldIndex and oldIndex > 1) and previous.states[oldIndex - 1] or ""
-			if oldIndex and prevEndState == state then
+			local prevEndDepth = (oldIndex and oldIndex > 1 and previous.depths) and previous.depths[oldIndex - 1] or 0
+			if oldIndex and prevEndState == state and prevEndDepth == bracketDepth then
 				result.spans[i] = previous.spans[oldIndex]
 				state = previous.states[oldIndex]
+				bracketDepth = (previous.depths and previous.depths[oldIndex]) or bracketDepth
 			else
 				local rawSpans
 				rawSpans, state = M.line(lines[i], state, cleanLang)
-				result.spans[i] = splitCommentTodoSpans(lines[i], rawSpans)
+				local withTodo = splitCommentTodoSpans(lines[i], rawSpans)
+				result.spans[i], bracketDepth = applyRainbowBracketsToLine(lines[i], withTodo, bracketDepth)
 			end
 			result.states[i] = state
+			result.depths[i] = bracketDepth
 		end
 		return result
 	end
@@ -390,14 +462,18 @@ return function(env)
 		todo_note = "#4fc1ff",
 	}
 
-	function M.rich(line, spans, colors)
+	function M.rich(line, spans, colors, opts)
 		if #line == 0 then return "" end
+		local useRainbow = not (opts and opts.rainbow == false)
 		local out = {}
 		for _, span in ipairs(spans or {}) do
 			local seg = util.escapeRichText(line:sub(span.first, span.last))
 			local todoHex = TODO_RICH_COLORS[span.kind]
+			local bracketHex = useRainbow and BRACKET_RICH_COLORS[span.kind] or nil
 			if todoHex then
 				out[#out + 1] = '<b><font color="' .. todoHex .. '">' .. seg .. "</font></b>"
+			elseif bracketHex then
+				out[#out + 1] = '<font color="' .. bracketHex .. '">' .. seg .. "</font>"
 			else
 				local hex = colors and colors[span.kind]
 				if hex and span.kind ~= "text" then

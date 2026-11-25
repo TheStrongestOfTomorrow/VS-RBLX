@@ -32,6 +32,14 @@ return function(env)
 			intellisense = true,
 			renderActiveLine = true,
 			codeFolding = true,
+			indentGuides = true,
+			bracketPairColorization = true,
+			stickyScroll = true,
+			inlineErrorLens = true,
+		},
+		keybindings = {
+			preset = "vscode",
+			toggleKey = "RightShift",
 		},
 		files = {
 			autoSave = "afterDelay",

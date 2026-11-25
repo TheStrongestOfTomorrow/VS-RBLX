@@ -62,7 +62,7 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 70, "All 70 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 74, "All 74 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
 
 	local gui = H.screen()
@@ -338,7 +338,121 @@ check("6. Phase 1 QoL: Ghost Opacity, Zen Mode, Seti Icons, Inline Explorer, Dir
 	assertTrue(H.sandbox.readfile("VSRBLX/workspaces/OctoDev__CombatEngine/src/skills.luau"):find("FIXME: fix mana cost", 1, true) ~= nil, "Confirm Save persisted buffer via writefile")
 end)
 
-check("7. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+check("7. Combined Phase 2+3: Monaco Smart Typing, Color Picker, Clipboard 15-Ring, Visuals & Crash Recovery", function()
+	-- (A) 15-Slot Persistent Clipboard Ring
+	api.clipboard.clear()
+	for i = 1, 18 do
+		api.clipboard.copy("snippet_" .. tostring(i))
+	end
+	local hist = api.clipboard.list()
+	assertEq(#hist, 15, "Clipboard ring capped at 15 slots")
+	assertEq(hist[1].text, "snippet_18", "Most recent copy at slot 1")
+	api.clipboard.copy("snippet_10")
+	assertEq(api.clipboard.list()[1].text, "snippet_10", "Duplicate copy promoted to slot 1 without growing past 15")
+
+	-- (B) Smart Typing: Auto-close pairs, Overtype, Empty-Pair Backspace, Smart Enter Indent & `{}` Expansion
+	local ea = api.editorActions
+	local paired, cur1 = ea.applySmartTyping("local t = ", "local t = {", 12, { langId = "luau", tabSize = 4, insertSpaces = true })
+	assertEq(paired, "local t = {}", "Auto-closed { -> {}")
+	assertEq(cur1, 12, "Cursor placed between { and }")
+
+	local expanded, cur2 = ea.applySmartTyping("local t = {}", "local t = {\n}", 13, { langId = "luau", tabSize = 4, insertSpaces = true })
+	assertEq(expanded, "local t = {\n    \n}", "Smart Enter between {} expanded 3-line indented block")
+	assertEq(cur2, 17, "Cursor positioned at inner indent stop")
+
+	local overtyped, cur3 = ea.applySmartTyping("call()", "call())", 7, { langId = "luau" })
+	assertEq(overtyped, "call()", "Closing ) overtyped instead of duplicating")
+	assertEq(cur3, 7, "Cursor stepped past closing )")
+
+	local bsPair, cur4 = ea.applySmartTyping("call()", "call)", 5, { langId = "luau" })
+	assertEq(bsPair, "call", "Backspacing opening ( in empty () removed both")
+	assertEq(cur4, 5, "Cursor stayed clean after pair backspace")
+
+	local luauIf, _ = ea.applySmartTyping("if ready then", "if ready then\n", 15, { langId = "luau", tabSize = 4, insertSpaces = true })
+	assertEq(luauIf, "if ready then\n    ", "Smart Enter after Luau `then` auto-indented 4 spaces")
+
+	-- (C) Live Editor Actions: Comment Toggle (`Ctrl+/`), Move Line, Duplicate, Delete, Undo/Redo
+	api.writeFile("src/theme_demo.luau", table.concat({
+		"local function paintHero(card)",
+		"    local accent = Color3.fromRGB(255, 85, 119)",
+		"    local glow = '#4ec9b0'",
+		"    return { card = (accent) }",
+		"end",
+	}, "\n"))
+	local demoDoc = api.openFile("src/theme_demo.luau")
+	local ed = api.app.primaryEditor
+	ed.box.CursorPosition = 1
+	ed.box.SelectionStart = -1
+
+	api.runCommand("editor.toggleComment")
+	assertTrue(demoDoc.content:find("^%-%- local function paintHero") ~= nil, "Ctrl+/ commented Luau line")
+	api.runCommand("editor.toggleComment")
+	assertTrue(demoDoc.content:find("^local function paintHero") ~= nil, "Ctrl+/ uncommented Luau line")
+
+	api.runCommand("editor.duplicateLineDown")
+	local dupLines = api._env.require("runtime/util").lines(demoDoc.content)
+	assertEq(dupLines[1], dupLines[2], "Shift+Alt+Down duplicated line 1")
+
+	api.runCommand("edit.undo")
+	assertEq(#api._env.require("runtime/util").lines(demoDoc.content), 5, "Ctrl+Z undid line duplication")
+	api.runCommand("edit.redo")
+	assertEq(#api._env.require("runtime/util").lines(demoDoc.content), 6, "Ctrl+Y redid line duplication")
+	api.runCommand("edit.undo")
+
+	-- (D) Inline Color Swatches + HSV Color Picker Format-Preserving Rewrite
+	local swatch1 = H.byName("ColorSwatch_1")
+	assertTrue(swatch1 ~= nil and swatch1.Visible == true, "Inline ColorSwatch_1 rendered for Color3.fromRGB(255, 85, 119)")
+	H.click(swatch1)
+	assertTrue(H.byName("InlineColorPicker").Visible == true, "Clicking swatch opened HSV InlineColorPicker")
+	ed.colorPicker.setRgb(16, 200, 140)
+	assertTrue(demoDoc.content:find("Color3.fromRGB(16, 200, 140)", 1, true) ~= nil, "HSV Color Picker rewrote Color3.fromRGB in-place")
+	ed.colorPicker.close()
+
+	-- (E) Rainbow Brackets, Indent Guides, Sticky Scroll & Inline Error Squiggles
+	local lexer = api._env.require("runtime/code_lexer")
+	local nestScan = lexer.scan("call(outer[inner{1}])", "luau")
+	local richNest = lexer.rich(nestScan.lines[1], nestScan.spans[1], api.theme.syntax)
+	assertTrue(richNest:find("#ffd700", 1, true) ~= nil and richNest:find("#da70d6", 1, true) ~= nil and richNest:find("#179fff", 1, true) ~= nil,
+		"Rainbow brackets colored depth 1/2/3 in gold, orchid, and blue")
+
+	assertTrue(H.byName("IndentGuide_1") ~= nil and H.byName("IndentGuide_1").Visible == true, "Vertical indent guides rendered")
+
+	-- Scroll past line 1 inside `paintHero` -> Sticky Scroll bar pins `local function paintHero(card)`
+	H.byName("EditorScroll").CanvasPosition = H.sandbox.Vector2.new(0, 42)
+	assertTrue(H.byName("StickyScrollBar").Visible == true, "StickyScrollBar pinned enclosing function signature while scrolling")
+	H.byName("EditorScroll").CanvasPosition = H.sandbox.Vector2.new(0, 0)
+
+	-- Syntax error triggers inline squiggle underline + Error Lens
+	api.codeStore.updateContent(demoDoc.id, "local broken = (\n")
+	api._env.require("runtime/diagnostics").check(demoDoc)
+	ed.refresh()
+	assertTrue(H.byName("DiagUnderline_1") ~= nil and H.byName("DiagUnderline_1").Visible == true, "Inline error squiggle underline rendered")
+	assertTrue(H.byName("ErrorLens_1") ~= nil and H.byName("ErrorLens_1").Visible == true, "Inline Error Lens message rendered")
+
+	-- (F) Keymap Preset Switcher
+	api.runCommand("workbench.keymapPreset")
+	assertEq(api.config.get("keybindings.preset"), "sublime", "Cycled keymap preset to sublime")
+	api.config.set("keybindings.preset", "vscode", { immediate = true })
+
+	-- (G) Crash-Proof Session & Unsaved Draft Auto-Recovery across reboot
+	api.codeStore.updateContent(demoDoc.id, "-- UNSAVED_CRASH_DRAFT_MARKER_999\nreturn true\n")
+	assertTrue(demoDoc.dirty == true, "Buffer is dirty and NOT saved via Ctrl+S")
+	assertTrue(api.session.saveNow() == true, "Session journal snapshot written to disk")
+
+	-- Simulate abrupt reload with `reload = true` and verify unsaved draft is restored!
+	local rebootChunk = assert(H.sandbox.loadstring(
+		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))({ reload = true })',
+		"@executor_reboot"
+	))
+	local rebootedApi = rebootChunk()
+	assertTrue(rebootedApi ~= nil and rebootedApi ~= api, "Fresh VSRBLX instance mounted after simulated crash")
+	api = rebootedApi
+	local recoveredDoc = api.codeStore.findByPath("src/theme_demo.luau")
+	assertTrue(recoveredDoc ~= nil and recoveredDoc.dirty == true, "Session journal reopened dirty tab")
+	assertTrue(recoveredDoc.content:find("UNSAVED_CRASH_DRAFT_MARKER_999", 1, true) ~= nil, "Exact unsaved draft content recovered after reboot!")
+end)
+
+check("8. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
 	-- Re-running the same build toggles visibility and returns existing handle
 	local secondChunk = assert(H.sandbox.loadstring(
 		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',
