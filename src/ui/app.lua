@@ -30,6 +30,8 @@ return function(env)
 	local bootProgress = env.require("runtime/boot_progress")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
+	local clipboard = env.require("runtime/clipboard")
+	local sessionJournal = env.require("runtime/session_journal")
 	local gitState = env.require("runtime/git_state")
 	local commands = env.require("runtime/command_catalog")
 	local shortcuts = env.require("runtime/shortcuts")
@@ -564,6 +566,97 @@ return function(env)
 				if doc and codeStore.redo then codeStore.redo(doc.id) end
 			end)
 
+			local function focusedEditor()
+				return codeStore.focusedPane == "secondary" and secondaryEditor or primaryEditor
+			end
+
+			reg("edit.clipboardHistory", "Paste from Clipboard History (15 Slots)", "Edit", "Ctrl+Shift+V", function()
+				local items = clipboard.list()
+				local menu = {}
+				if #items == 0 then
+					overlay.toast("Clipboard history is empty — copy or select code first.", "info", 2.2)
+					return
+				end
+				for idx, entry in ipairs(items) do
+					local rawText = entry.text
+					menu[#menu + 1] = {
+						label = string.format("%d. %s", idx, entry.preview or ""),
+						shortcut = string.format("%d ch", entry.chars or #rawText),
+						onClick = function()
+							focusedEditor().runAction("insertText", rawText)
+						end,
+					}
+				end
+				menu[#menu + 1] = { separator = true }
+				menu[#menu + 1] = {
+					label = "Clear Clipboard History",
+					onClick = function()
+						clipboard.clear()
+						overlay.toast("Cleared 15-slot clipboard history", "warn", 2)
+					end,
+				}
+				local wBounds = win.root.AbsolutePosition
+				local wSize = win.root.AbsoluteSize
+				overlay.dropdown(math.max(16, wBounds.X + math.floor(wSize.X * 0.5) - 170), math.max(40, wBounds.Y + 64), menu, 340)
+			end)
+
+			reg("editor.toggleComment", "Toggle Line Comment", "Edit", "Ctrl+/", function()
+				return focusedEditor().runAction("toggleComment")
+			end)
+			reg("editor.indentLines", "Indent Line / Selection", "Edit", "Ctrl+]", function()
+				return focusedEditor().runAction("indent")
+			end)
+			reg("editor.outdentLines", "Outdent Line / Selection", "Edit", "Ctrl+[", function()
+				return focusedEditor().runAction("outdent")
+			end)
+			reg("editor.moveLineUp", "Move Line Up", "Edit", "Alt+Up", function()
+				return focusedEditor().runAction("moveLineUp")
+			end)
+			reg("editor.moveLineDown", "Move Line Down", "Edit", "Alt+Down", function()
+				return focusedEditor().runAction("moveLineDown")
+			end)
+			reg("editor.duplicateLineDown", "Duplicate Line Down", "Edit", "Shift+Alt+Down", function()
+				return focusedEditor().runAction("duplicateLineDown")
+			end)
+			reg("editor.duplicateLineUp", "Duplicate Line Up", "Edit", "Shift+Alt+Up", function()
+				return focusedEditor().runAction("duplicateLineUp")
+			end)
+			reg("editor.deleteLine", "Delete Line", "Edit", "Ctrl+Shift+K", function()
+				return focusedEditor().runAction("deleteLine")
+			end)
+			reg("editor.selectWord", "Select Word at Cursor", "Selection", "Ctrl+D", function()
+				return focusedEditor().runAction("selectWord")
+			end)
+			reg("editor.selectLine", "Select Entire Line", "Selection", "Ctrl+L", function()
+				return focusedEditor().runAction("selectLine")
+			end)
+			reg("editor.copyLine", "Copy Selection or Line to Clipboard Ring", "Edit", nil, function()
+				return focusedEditor().runAction("copySelectionOrLine")
+			end)
+
+			reg("workbench.changeToggleKey", "Capture Custom Toggle Window Hotkey...", "Preferences", nil, function()
+				overlay.toast("Press any key now to set your VS-RBLX Toggle Hotkey...", "info", 4)
+				shortcuts.captureNextKey(function(newKey)
+					config.set("keybindings.toggleKey", newKey, { immediate = true })
+					shortcuts.applyPreset()
+					overlay.toast("VS-RBLX Toggle Hotkey bound to: " .. tostring(newKey), "good", 3)
+				end)
+			end)
+
+			reg("workbench.keymapPreset", "Cycle Keymap Preset (VS Code / Sublime / Touch)", "Preferences", nil, function()
+				local order = { "vscode", "sublime", "touch" }
+				local cur = tostring(config.get("keybindings.preset", "vscode"))
+				local nextIdx = 1
+				for i, p in ipairs(order) do
+					if p == cur then nextIdx = (i % #order) + 1; break end
+				end
+				local nextPreset = order[nextIdx]
+				config.set("keybindings.preset", nextPreset, { immediate = true })
+				shortcuts.applyPreset(nextPreset)
+				overlay.toast("Keymap preset switched to: " .. nextPreset, "good", 2.5)
+				return nextPreset
+			end)
+
 			reg("editor.find", "Find in Active File", "Edit", "Ctrl+F", function()
 				local target = codeStore.focusedPane == "secondary" and secondaryEditor or primaryEditor
 				target.openFind(false)
@@ -689,48 +782,33 @@ return function(env)
 		end
 
 		local function bindShortcuts()
-			shortcuts.bind({ key = "RightShift" }, "workbench.toggleWindow", true)
-			shortcuts.bind({ key = "F11" }, "window.maximize", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "Z" }, "workbench.toggleZenMode", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "M" }, "workbench.showTodos", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "P" }, "workbench.commandPalette", true)
-			shortcuts.bind({ key = "F1" }, "workbench.commandPalette", true)
-			shortcuts.bind({ key = "F2" }, "file.rename", true)
-			shortcuts.bind({ ctrl = true, key = "P" }, "workbench.quickOpen", true)
-			shortcuts.bind({ ctrl = true, key = "B" }, "workbench.toggleSideBar", true)
-			shortcuts.bind({ ctrl = true, key = "J" }, "workbench.togglePanel", true)
-			shortcuts.bind({ ctrl = true, key = "Backquote" }, "workbench.togglePanel", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "E" }, "workbench.viewExplorer", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "F" }, "workbench.viewSearch", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "G" }, "workbench.viewScm", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "D" }, "workbench.viewDebug", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "X" }, "workbench.viewExtensions", true)
-			shortcuts.bind({ ctrl = true, key = "Comma" }, "workbench.viewSettings", true)
-			shortcuts.bind({ ctrl = true, key = "S" }, "file.save", true)
-			shortcuts.bind({ ctrl = true, shift = true, key = "S" }, "file.saveAll", true)
-			shortcuts.bind({ ctrl = true, key = "N" }, "file.newUntitled", true)
-			shortcuts.bind({ ctrl = true, key = "W" }, "file.closeTab", true)
-			shortcuts.bind({ ctrl = true, key = "F" }, "editor.find", true)
-			shortcuts.bind({ ctrl = true, key = "H" }, "editor.replace", true)
-			shortcuts.bind({ ctrl = true, key = "G" }, "editor.gotoLine", true)
-			shortcuts.bind({ shift = true, alt = true, key = "F" }, "editor.format", true)
-			shortcuts.bind({ ctrl = true, key = "Backslash" }, "editor.toggleSplit", true)
-			shortcuts.bind({ alt = true, key = "Z" }, "editor.toggleWordWrap", true)
-			shortcuts.bind({ key = "F5" }, "run.activeFile", true)
+			shortcuts.applyPreset()
 			shortcuts.install()
 		end
 
+		config.changed:connect(function(key)
+			if key == "*" or key == "keybindings.preset" or key == "keybindings.toggleKey" then
+				shortcuts.applyPreset()
+			end
+		end)
+
 		registerCommands()
 		bindShortcuts()
+		clipboard.load()
 
-		-- Open starter files from disk workspace
-		if workspaceFs.exists("README.md") then
-			codeStore.openFile("README.md")
-		end
-		if workspaceFs.exists("src/main.luau") then
-			codeStore.openFile("src/main.luau")
-		elseif workspaceFs.exists("src/init.luau") then
-			codeStore.openFile("src/init.luau")
+		-- Restore previous session tabs & unsaved crash drafts, or open starter files
+		local restoredSession, recoveredDrafts = sessionJournal.restore()
+		if not restoredSession then
+			if workspaceFs.exists("README.md") then
+				codeStore.openFile("README.md")
+			end
+			if workspaceFs.exists("src/main.luau") then
+				codeStore.openFile("src/main.luau")
+			elseif workspaceFs.exists("src/init.luau") then
+				codeStore.openFile("src/init.luau")
+			end
+		elseif recoveredDrafts and recoveredDrafts > 0 then
+			overlay.toast(string.format("Recovered %d unsaved draft(s) from session", recoveredDrafts), "good", 3)
 		end
 
 		for k, v in pairs(viewlets) do

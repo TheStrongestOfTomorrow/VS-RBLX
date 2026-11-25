@@ -1,9 +1,16 @@
--- Keyboard shortcut listener & dispatcher supporting Ctrl/Cmd + Shift + Alt chords.
+-- Keyboard shortcut listener, custom toggle hotkey binder, & Keymap Preset Switcher
+-- (`vscode`, `sublime`, `touch`).
 return function(env)
 	local dispose = env.require("runtime/dispose")
+	local config = env.require("runtime/config")
 	local commands = env.require("runtime/command_catalog")
 
-	local M = { bindings = {}, enabled = true }
+	local M = {
+		bindings = {},
+		enabled = true,
+		installed = false,
+		capturingCallback = nil,
+	}
 
 	local function ctrlDown()
 		local uis = env.uis
@@ -35,6 +42,10 @@ return function(env)
 		return ok and down == true
 	end
 
+	function M.clear()
+		M.bindings = {}
+	end
+
 	function M.bind(chord, commandId, allowWhenTyping)
 		M.bindings[#M.bindings + 1] = {
 			ctrl = chord.ctrl == true,
@@ -46,12 +57,97 @@ return function(env)
 		}
 	end
 
+	function M.captureNextKey(callback)
+		M.capturingCallback = callback
+	end
+
+	-- Applies base VS Code bindings + active preset (`vscode`, `sublime`, `touch`) + custom toggle hotkey
+	function M.applyPreset(presetName, toggleKeyName)
+		local preset = tostring(presetName or config.get("keybindings.preset", "vscode") or "vscode")
+		local toggleKey = tostring(toggleKeyName or config.get("keybindings.toggleKey", "RightShift") or "RightShift")
+		M.clear()
+
+		-- Custom Window Toggle Key
+		if toggleKey ~= "" and toggleKey ~= "None" then
+			M.bind({ key = toggleKey }, "workbench.toggleWindow", true)
+		end
+
+		-- Universal Workbench & File Shortcuts
+		M.bind({ key = "F11" }, "window.maximize", true)
+		M.bind({ ctrl = true, shift = true, key = "Z" }, "workbench.toggleZenMode", true)
+		M.bind({ ctrl = true, shift = true, key = "M" }, "workbench.showTodos", true)
+		M.bind({ ctrl = true, shift = true, key = "P" }, "workbench.commandPalette", true)
+		M.bind({ key = "F1" }, "workbench.commandPalette", true)
+		M.bind({ key = "F2" }, "file.rename", false)
+		M.bind({ ctrl = true, key = "P" }, "workbench.quickOpen", true)
+		M.bind({ ctrl = true, key = "B" }, "workbench.toggleSideBar", true)
+		M.bind({ ctrl = true, key = "J" }, "workbench.togglePanel", true)
+		M.bind({ ctrl = true, key = "Backquote" }, "workbench.togglePanel", true)
+		M.bind({ ctrl = true, shift = true, key = "E" }, "workbench.viewExplorer", true)
+		M.bind({ ctrl = true, shift = true, key = "F" }, "workbench.viewSearch", true)
+		M.bind({ ctrl = true, shift = true, key = "G" }, "workbench.viewScm", true)
+		M.bind({ ctrl = true, shift = true, key = "D" }, "workbench.viewDebug", true)
+		M.bind({ ctrl = true, shift = true, key = "X" }, "workbench.viewExtensions", true)
+		M.bind({ ctrl = true, key = "Comma" }, "workbench.viewSettings", true)
+		M.bind({ ctrl = true, key = "S" }, "file.save", true)
+		M.bind({ ctrl = true, shift = true, key = "S" }, "file.saveAll", true)
+		M.bind({ ctrl = true, key = "N" }, "file.newUntitled", true)
+		M.bind({ ctrl = true, key = "W" }, "file.closeTab", true)
+		M.bind({ ctrl = true, shift = true, key = "V" }, "edit.clipboardHistory", true)
+
+		-- Monaco Editing Shortcuts
+		M.bind({ ctrl = true, key = "Z" }, "edit.undo", true)
+		M.bind({ ctrl = true, key = "Y" }, "edit.redo", true)
+		M.bind({ ctrl = true, key = "Slash" }, "editor.toggleComment", true)
+		M.bind({ alt = true, key = "Up" }, "editor.moveLineUp", true)
+		M.bind({ alt = true, key = "Down" }, "editor.moveLineDown", true)
+		M.bind({ shift = true, alt = true, key = "Down" }, "editor.duplicateLineDown", true)
+		M.bind({ shift = true, alt = true, key = "Up" }, "editor.duplicateLineUp", true)
+		M.bind({ ctrl = true, shift = true, key = "K" }, "editor.deleteLine", true)
+		M.bind({ ctrl = true, key = "D" }, "editor.selectWord", true)
+		M.bind({ ctrl = true, key = "L" }, "editor.selectLine", true)
+		M.bind({ ctrl = true, key = "RightBracket" }, "editor.indentLines", true)
+		M.bind({ ctrl = true, key = "LeftBracket" }, "editor.outdentLines", true)
+		M.bind({ ctrl = true, key = "F" }, "editor.find", true)
+		M.bind({ ctrl = true, key = "H" }, "editor.replace", true)
+		M.bind({ ctrl = true, key = "G" }, "editor.gotoLine", true)
+		M.bind({ shift = true, alt = true, key = "F" }, "editor.format", true)
+		M.bind({ ctrl = true, key = "Backslash" }, "editor.toggleSplit", true)
+		M.bind({ alt = true, key = "Z" }, "editor.toggleWordWrap", true)
+		M.bind({ key = "F5" }, "run.activeFile", true)
+
+		-- Preset-specific extras
+		if preset == "sublime" then
+			M.bind({ ctrl = true, shift = true, key = "D" }, "editor.duplicateLineDown", true)
+			M.bind({ ctrl = true, shift = true, key = "Up" }, "editor.moveLineUp", true)
+			M.bind({ ctrl = true, shift = true, key = "Down" }, "editor.moveLineDown", true)
+		elseif preset == "touch" then
+			M.bind({ key = "F8" }, "run.activeFile", true)
+			M.bind({ key = "F4" }, "workbench.toggleWindow", true)
+		end
+	end
+
 	function M.install()
-		if not env.uis then return end
+		if M.installed or not env.uis then return end
+		M.installed = true
 		dispose.connection(env.uis.InputBegan:Connect(function(input, gameProcessed)
 			if not M.enabled then return end
 			if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 			local keyName = input.KeyCode and input.KeyCode.Name or ""
+			if keyName == "" or keyName == "Unknown" then return end
+
+			-- Interactive custom toggle hotkey capture
+			if M.capturingCallback then
+				local ignoreMod = keyName == "LeftControl" or keyName == "RightControl"
+					or keyName == "LeftShift" or keyName == "LeftAlt" or keyName == "RightAlt"
+				if not ignoreMod then
+					local cb = M.capturingCallback
+					M.capturingCallback = nil
+					pcall(cb, keyName)
+					return
+				end
+			end
+
 			local c, s, a = ctrlDown(), shiftDown(), altDown()
 			local focusedBox = nil
 			pcall(function() focusedBox = env.uis:GetFocusedTextBox() end)
