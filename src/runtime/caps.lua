@@ -11,13 +11,34 @@ return function(env)
 		return type(value) == "function" and value or nil
 	end
 
+	local genvTable = nil
+	if type(getgenv) == "function" then
+		local ok, g = pcall(getgenv)
+		if ok and type(g) == "table" then
+			genvTable = g
+		end
+	end
+
+	local function hostGlobal(key, directVal)
+		if directVal ~= nil then return directVal end
+		if genvTable ~= nil then
+			local ok, val = pcall(function() return genvTable[key] end)
+			if ok and val ~= nil then return val end
+		end
+		return nil
+	end
+
+	local synTbl = hostGlobal("syn", syn)
+	local httpTbl = hostGlobal("http", http)
+	local fluxusTbl = hostGlobal("fluxus", fluxus)
+
 	local function findRequests()
 		local candidates = {
-			{ name = "request", fn = callable(request) },
-			{ name = "http_request", fn = callable(http_request) },
-			{ name = "syn.request", fn = type(syn) == "table" and callable(syn.request) or nil },
-			{ name = "http.request", fn = type(http) == "table" and callable(http.request) or nil },
-			{ name = "fluxus.request", fn = type(fluxus) == "table" and callable(fluxus.request) or nil },
+			{ name = "request", fn = callable(hostGlobal("request", request)) },
+			{ name = "http_request", fn = callable(hostGlobal("http_request", http_request)) },
+			{ name = "syn.request", fn = type(synTbl) == "table" and callable(synTbl.request) or nil },
+			{ name = "http.request", fn = type(httpTbl) == "table" and callable(httpTbl.request) or nil },
+			{ name = "fluxus.request", fn = type(fluxusTbl) == "table" and callable(fluxusTbl.request) or nil },
 		}
 		local found, seen = {}, {}
 		for _, candidate in ipairs(candidates) do
@@ -30,9 +51,9 @@ return function(env)
 	end
 
 	local function findClipboard()
-		return callable(setclipboard)
-			or callable(toclipboard)
-			or (type(syn) == "table" and callable(syn.write_clipboard))
+		return callable(hostGlobal("setclipboard", setclipboard))
+			or callable(hostGlobal("toclipboard", toclipboard))
+			or (type(synTbl) == "table" and callable(synTbl.write_clipboard))
 			or nil
 	end
 
@@ -41,14 +62,7 @@ return function(env)
 	local requestFn = primaryRequest and primaryRequest.fn or nil
 	local requestName = primaryRequest and primaryRequest.name or nil
 
-	local compiler = callable(loadstring)
-	if not compiler and callable(getgenv) then
-		local ok, globals = pcall(getgenv)
-		if ok and type(globals) == "table" then
-			local readOk, candidate = pcall(function() return globals.loadstring end)
-			if readOk then compiler = callable(candidate) end
-		end
-	end
+	local compiler = callable(hostGlobal("loadstring", loadstring))
 
 	local httpGetFn = nil
 	pcall(function()
@@ -62,24 +76,26 @@ return function(env)
 	M.fn = {
 		request = requestFn,
 		httpGet = httpGetFn,
-		readfile = callable(readfile),
-		writefile = callable(writefile),
-		appendfile = callable(appendfile),
-		isfile = callable(isfile),
-		isfolder = callable(isfolder),
-		makefolder = callable(makefolder),
-		listfiles = callable(listfiles),
-		delfile = callable(delfile),
-		delfolder = callable(delfolder),
+		readfile = callable(hostGlobal("readfile", readfile)),
+		writefile = callable(hostGlobal("writefile", writefile)),
+		appendfile = callable(hostGlobal("appendfile", appendfile)),
+		isfile = callable(hostGlobal("isfile", isfile)),
+		isfolder = callable(hostGlobal("isfolder", isfolder)),
+		makefolder = callable(hostGlobal("makefolder", makefolder)),
+		listfiles = callable(hostGlobal("listfiles", listfiles)),
+		delfile = callable(hostGlobal("delfile", delfile)),
+		delfolder = callable(hostGlobal("delfolder", delfolder)),
 		loadstring = compiler,
 		getgenv = callable(getgenv),
-		gethui = callable(gethui),
+		gethui = callable(hostGlobal("gethui", gethui)),
+		protectGui = type(synTbl) == "table" and callable(synTbl.protect_gui) or nil,
 		clipboard = findClipboard(),
-		identify = callable(identifyexecutor) or callable(getexecutorname),
-		decompile = callable(decompile),
-		getscriptbytecode = callable(getscriptbytecode),
-		customasset = callable(getcustomasset),
-		cloneref = callable(cloneref),
+		identify = callable(hostGlobal("identifyexecutor", identifyexecutor))
+			or callable(hostGlobal("getexecutorname", getexecutorname)),
+		decompile = callable(hostGlobal("decompile", decompile)),
+		getscriptbytecode = callable(hostGlobal("getscriptbytecode", getscriptbytecode)),
+		customasset = callable(hostGlobal("getcustomasset", getcustomasset)),
+		cloneref = callable(hostGlobal("cloneref", cloneref)),
 	}
 
 	M.requestName = requestName

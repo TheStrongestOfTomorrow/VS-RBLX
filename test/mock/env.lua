@@ -227,6 +227,9 @@ function M.new(opts)
 			end,
 			__newindex = function(_, key, val)
 				if key == "Parent" then
+					if val and rawget(val, "__lockedParent") then
+						error("The current thread cannot access 'CoreGui' (lacking capability Plugin)", 2)
+					end
 					if props.Parent and props.Parent.__children then
 						local oldList = props.Parent.__children
 						for i = #oldList, 1, -1 do
@@ -252,6 +255,9 @@ function M.new(opts)
 
 	local Instance = { new = createInstance }
 	local coreGui = createInstance("CoreGui")
+	if opts.executor == false or opts.lockCoreGui == true then
+		rawset(coreGui, "__lockedParent", true)
+	end
 	local playerGui = createInstance("PlayerGui")
 	local localPlayer = createInstance("Player")
 	localPlayer.Name = "DevPlayer"
@@ -421,15 +427,17 @@ function M.new(opts)
 			consoleOut[#consoleOut + 1] = "[WARN] " .. table.concat(t, "\t")
 		end,
 	}
-	sandbox.loadfile = function(path)
-		local fh, openErr = io.open(path, "rb")
-		if not fh then return nil, openErr end
-		local src = fh:read("*a")
-		fh:close()
-		local fn, lErr = loadstring(src, "@" .. path)
-		if not fn then return nil, lErr end
-		setfenv(fn, sandbox)
-		return fn
+	if opts.allowHostLoadfile == true then
+		sandbox.loadfile = function(path)
+			local fh, openErr = io.open(path, "rb")
+			if not fh then return nil, openErr end
+			local src = fh:read("*a")
+			fh:close()
+			local fn, lErr = loadstring(src, "@" .. path)
+			if not fn then return nil, lErr end
+			setfenv(fn, sandbox)
+			return fn
+		end
 	end
 
 	if opts.executor ~= false then
@@ -519,8 +527,35 @@ function M.new(opts)
 		end
 	end
 
-	setmetatable(sandbox, { __index = _G })
-	sandbox._G = sandbox
+	local SAFE_STDLIB = {
+		math = math,
+		string = string,
+		table = table,
+		coroutine = coroutine,
+		os = { clock = os.clock, time = os.time, difftime = os.difftime },
+		utf8 = rawget(_G, "utf8"),
+		pcall = pcall,
+		xpcall = xpcall,
+		ipairs = ipairs,
+		pairs = pairs,
+		next = next,
+		select = select,
+		tonumber = tonumber,
+		tostring = tostring,
+		type = type,
+		assert = assert,
+		error = error,
+		setmetatable = setmetatable,
+		getmetatable = getmetatable,
+		rawget = rawget,
+		rawset = rawset,
+		rawequal = rawequal,
+		setfenv = setfenv,
+		getfenv = getfenv,
+		unpack = unpack,
+	}
+	setmetatable(sandbox, { __index = SAFE_STDLIB })
+	sandbox._G = {}
 
 	local H = {
 		sandbox = sandbox,

@@ -1,172 +1,258 @@
--- VS-RBLX: Visual Studio Code for Roblox (100% Luau · LocalScript & Executor IDE)
--- Supports executor disk persistence (`writefile`/`readfile`), GitHub HTTP sync,
--- 17-language RichText syntax highlighting, and a draggable/auto-resized/resizable workbench.
+--!globals __VSRBLX_MODULES __VSRBLX_BUILD
+-- VS-RBLX Bootstrap (`init.lua`).
+--
+-- Every file under `src/` is a factory of the form `return function(env) ... end`.
+-- `tools/bundle.lua` emits `local __VSRBLX_BUILD` and `local __VSRBLX_MODULES` above
+-- this bootstrap in `dist/vsrblx.lua`, so `__VSRBLX_MODULES` is bound directly as a
+-- lexical local inside the single-file bundle:
+--
+--     loadstring(game:HttpGet("https://raw.githubusercontent.com/TheStrongestOfTomorrow/VS-RBLX/main/dist/vsrblx.lua"))()
 
-local VERSION = "1.0.0"
+local MODULES = __VSRBLX_MODULES
+local isDevFallback = false
 
-local function safeGlobal(name)
-	local ok, val = pcall(function()
-		local g = (type(getgenv) == "function" and getgenv()) or _G
-		if g and g[name] ~= nil then return g[name] end
-		return _G[name]
-	end)
-	if ok and val ~= nil then return val end
-	return rawget(_G, name)
+if type(MODULES) ~= "table" then
+	if type(loadfile) == "function" then
+		isDevFallback = true
+		MODULES = setmetatable({}, {
+			__index = function(cache, id)
+				local relPath = "src/" .. tostring(id) .. ".lua"
+				local chunk = loadfile(relPath)
+				if not chunk then return nil end
+				local factory = chunk()
+				cache[id] = factory
+				return factory
+			end,
+		})
+	else
+		warn("[vsrblx] no module table -- run the bundled dist/vsrblx.lua, not init.lua")
+		return nil
+	end
 end
 
-local function safeService(name)
-	if game and type(game.GetService) == "function" then
-		local ok, svc = pcall(function() return game:GetService(name) end)
-		if ok and svc then return svc end
+local hostContext = ...
+
+local VERSION = "1.0.0"
+local FOLDER = "VSRBLX"
+local BUILD = type(__VSRBLX_BUILD) == "string" and __VSRBLX_BUILD or (VERSION .. "-dev")
+
+-- If executed from autoexec before the DataModel finishes loading, wait cleanly.
+if game and type(game.IsLoaded) == "function" then
+	local ok, loadedFlag = pcall(function() return game:IsLoaded() end)
+	if ok and not loadedFlag and game.Loaded then
+		pcall(function() game.Loaded:Wait() end)
+	end
+end
+
+local globalTable = nil
+if type(getgenv) == "function" then
+	local ok, g = pcall(getgenv)
+	if ok and type(g) == "table" then
+		globalTable = g
+	end
+end
+if not globalTable and type(_G) == "table" then
+	globalTable = _G
+end
+
+local function lookupGlobal(key, directVal)
+	if directVal ~= nil then return directVal end
+	if globalTable ~= nil then
+		local ok, v = pcall(function() return globalTable[key] end)
+		if ok and v ~= nil then return v end
 	end
 	return nil
 end
 
-local function createEnv(customOpts)
-	customOpts = customOpts or {}
-	local buildMeta = rawget(_G, "__VSRBLX_BUILD") or {
-		version = VERSION,
-		id = VERSION .. "-dev",
-		channel = "dev",
-	}
-	local moduleTable = rawget(_G, "__VSRBLX_MODULES") or {}
-	local loaded = {}
-	local loading = {}
+local options = (type(hostContext) == "table" and hostContext)
+	or (globalTable and type(globalTable.VSRBLX_CONFIG) == "table" and globalTable.VSRBLX_CONFIG)
+	or {}
 
-	local services = {
-		Workspace = workspace or safeService("Workspace"),
-		Players = safeService("Players"),
-		UserInputService = safeService("UserInputService"),
-		TweenService = safeService("TweenService"),
-		HttpService = safeService("HttpService"),
-		RunService = safeService("RunService"),
-		TextService = safeService("TextService"),
-		GuiService = safeService("GuiService"),
-		CoreGui = safeService("CoreGui"),
-		ReplicatedStorage = safeService("ReplicatedStorage"),
-		StarterPlayer = safeService("StarterPlayer"),
-		StarterGui = safeService("StarterGui"),
-	}
-
-	local localPlr = services.Players and services.Players.LocalPlayer or nil
-
-	local env = {
-		version = buildMeta.version or VERSION,
-		buildId = buildMeta.id or (VERSION .. "-dev"),
-		channel = buildMeta.channel or "dev",
-		info = {
-			version = buildMeta.version or VERSION,
-			build = buildMeta.id or (VERSION .. "-dev"),
-			folder = customOpts.folder or "VSRBLX",
-		},
-		opts = customOpts,
-		services = services,
-
-		-- Service shortcuts
-		game = game,
-		workspace = services.Workspace,
-		players = services.Players,
-		plr = localPlr,
-		uis = services.UserInputService,
-		tween = services.TweenService,
-		hs = services.HttpService,
-		httpService = services.HttpService,
-		runService = services.RunService,
-		textService = services.TextService,
-		guisvc = services.GuiService,
-		guiService = services.GuiService,
-		coreGui = services.CoreGui,
-
-		-- Executor host capabilities
-		getgenv = safeGlobal("getgenv"),
-		gethui = safeGlobal("gethui"),
-		identifyexecutor = safeGlobal("identifyexecutor") or safeGlobal("getexecutorname"),
-		loadstring = safeGlobal("loadstring") or loadstring,
-
-		-- Executor local disk filesystem (`writefile` / `readfile`)
-		writefile = safeGlobal("writefile"),
-		readfile = safeGlobal("readfile"),
-		appendfile = safeGlobal("appendfile"),
-		isfile = safeGlobal("isfile"),
-		isfolder = safeGlobal("isfolder"),
-		makefolder = safeGlobal("makefolder"),
-		listfiles = safeGlobal("listfiles"),
-		delfile = safeGlobal("delfile"),
-		delfolder = safeGlobal("delfolder"),
-
-		-- Executor HTTP transport (`request` / `http_request` / `syn.request`)
-		request = safeGlobal("request"),
-		http_request = safeGlobal("http_request"),
-		http = safeGlobal("http"),
-		syn = safeGlobal("syn"),
-		fluxus = safeGlobal("fluxus"),
-
-		-- Clipboard & script inspection
-		setclipboard = safeGlobal("setclipboard") or safeGlobal("toclipboard"),
-		getclipboard = safeGlobal("getclipboard"),
-		decompile = safeGlobal("decompile"),
-		getscriptbytecode = safeGlobal("getscriptbytecode"),
-	}
-
-	local function resolveFactory(modId)
-		if moduleTable[modId] then
-			return moduleTable[modId]
-		end
-		local relPath = "src/" .. modId .. ".lua"
-		if type(loadfile) == "function" then
-			local chunk, err = loadfile(relPath)
-			if not chunk then error("Failed to load " .. relPath .. ": " .. tostring(err)) end
-			return chunk()
-		end
-		if type(env.readfile) == "function" and type(env.loadstring) == "function" then
-			local ok, src = pcall(env.readfile, relPath)
-			if ok and type(src) == "string" then
-				local chunk, err = env.loadstring(src, "@" .. relPath)
-				if not chunk then error("Compile error in " .. relPath .. ": " .. tostring(err)) end
-				return chunk()
+-- Re-running the same build toggles/reopens the existing window unless `reload = true`;
+-- running a newer build tears down the old instance cleanly and mounts the update.
+if globalTable then
+	local okExisting, existing = pcall(function() return globalTable.VSRBLX end)
+	if okExisting and type(existing) == "table" and existing.alive then
+		if existing.build == BUILD and options.reload ~= true and not isDevFallback then
+			if options.reuse ~= true and type(existing.toggle) == "function" then
+				pcall(existing.toggle)
 			end
+			return existing
 		end
-		error("Module not found: " .. tostring(modId))
+		if type(existing.destroy) == "function" then
+			pcall(existing.destroy)
+		end
 	end
-
-	function env.require(modId)
-		if loaded[modId] ~= nil then
-			return loaded[modId]
-		end
-		if loading[modId] then
-			error("Circular module dependency detected: " .. tostring(modId))
-		end
-		loading[modId] = true
-		local factory = resolveFactory(modId)
-		if type(factory) ~= "function" then
-			loading[modId] = nil
-			error("Module " .. tostring(modId) .. " must return function(env)")
-		end
-		local result = factory(env)
-		loading[modId] = nil
-		loaded[modId] = result == nil and true or result
-		return loaded[modId]
-	end
-
-	return env
 end
 
-local function boot(userOpts)
-	local globalHost = (type(getgenv) == "function" and getgenv()) or _G
-	local bootCfg = userOpts or (globalHost and globalHost.VSRBLX_CONFIG) or {}
+-- Lazy memoised service lookup via game:GetService (safe even if instances were renamed).
+local services = setmetatable({}, {
+	__index = function(cache, name)
+		if not game or type(game.GetService) ~= "function" then return nil end
+		local ok, svc = pcall(function() return game:GetService(name) end)
+		if not ok or not svc then return nil end
+		cache[name] = svc
+		return svc
+	end,
+})
 
-	if globalHost and type(globalHost.VSRBLX) == "table" and type(globalHost.VSRBLX.destroy) == "function" then
-		pcall(globalHost.VSRBLX.destroy)
+local playersService = services.Players
+local localPlr = playersService and playersService.LocalPlayer or nil
+if not localPlr and playersService then
+	pcall(function()
+		local sig = playersService:GetPropertyChangedSignal("LocalPlayer")
+		if sig and not playersService.LocalPlayer then
+			-- Brief non-blocking check in case LocalPlayer attaches on the next frame
+			task.wait()
+		end
+		localPlr = playersService.LocalPlayer
+	end)
+end
+
+local env = {
+	version = VERSION,
+	buildId = BUILD,
+	channel = type(__VSRBLX_BUILD) == "string" and "release" or "dev",
+	info = {
+		name = "VSRBLX",
+		version = VERSION,
+		build = BUILD,
+		folder = options.folder or FOLDER,
+	},
+	opts = options,
+	context = options,
+	services = services,
+
+	-- Service shortcuts
+	game = game,
+	workspace = services.Workspace or workspace,
+	players = playersService,
+	plr = localPlr,
+	uis = services.UserInputService,
+	tween = services.TweenService,
+	hs = services.HttpService,
+	httpService = services.HttpService,
+	runService = services.RunService,
+	textService = services.TextService,
+	guisvc = services.GuiService,
+	guiService = services.GuiService,
+	coreGui = services.CoreGui,
+
+	-- Executor host capabilities
+	getgenv = lookupGlobal("getgenv", getgenv),
+	gethui = lookupGlobal("gethui", gethui),
+	identifyexecutor = lookupGlobal("identifyexecutor", identifyexecutor)
+		or lookupGlobal("getexecutorname", getexecutorname),
+	loadstring = lookupGlobal("loadstring", loadstring),
+
+	-- Executor local disk filesystem (`writefile` / `readfile`)
+	writefile = lookupGlobal("writefile", writefile),
+	readfile = lookupGlobal("readfile", readfile),
+	appendfile = lookupGlobal("appendfile", appendfile),
+	isfile = lookupGlobal("isfile", isfile),
+	isfolder = lookupGlobal("isfolder", isfolder),
+	makefolder = lookupGlobal("makefolder", makefolder),
+	listfiles = lookupGlobal("listfiles", listfiles),
+	delfile = lookupGlobal("delfile", delfile),
+	delfolder = lookupGlobal("delfolder", delfolder),
+
+	-- Executor HTTP transport (`request` / `http_request` / `syn.request`)
+	request = lookupGlobal("request", request),
+	http_request = lookupGlobal("http_request", http_request),
+	http = lookupGlobal("http", http),
+	syn = lookupGlobal("syn", syn),
+	fluxus = lookupGlobal("fluxus", fluxus),
+
+	-- Clipboard & script inspection
+	setclipboard = lookupGlobal("setclipboard", setclipboard)
+		or lookupGlobal("toclipboard", toclipboard),
+	getclipboard = lookupGlobal("getclipboard", getclipboard),
+	decompile = lookupGlobal("decompile", decompile),
+	getscriptbytecode = lookupGlobal("getscriptbytecode", getscriptbytecode),
+}
+
+local loaded, loading, requireStack = {}, {}, {}
+
+env.moduleTotal = 0
+if not isDevFallback then
+	for _ in pairs(MODULES) do
+		env.moduleTotal = env.moduleTotal + 1
+	end
+end
+env.moduleCount = 0
+env.loadedModules = loaded
+
+function env.require(id)
+	local cached = loaded[id]
+	if cached ~= nil then return cached end
+	if loading[id] then
+		local cycle = {}
+		for i = 1, #requireStack do cycle[#cycle + 1] = requireStack[i] end
+		cycle[#cycle + 1] = tostring(id)
+		error("[vsrblx] circular require: " .. table.concat(cycle, " -> "), 2)
+	end
+	local factory = MODULES[id]
+	if type(factory) ~= "function" then
+		error("[vsrblx] no module '" .. tostring(id) .. "'", 2)
+	end
+	loading[id] = true
+	requireStack[#requireStack + 1] = tostring(id)
+	local ok, result = pcall(factory, env)
+	requireStack[#requireStack] = nil
+	loading[id] = nil
+	if not ok then
+		error("[vsrblx] module '" .. tostring(id) .. "' failed to load: " .. tostring(result), 2)
+	end
+	if result == nil then
+		error("[vsrblx] module '" .. tostring(id) .. "' returned nothing", 2)
+	end
+	loaded[id] = result
+	env.moduleCount = env.moduleCount + 1
+	if env.onModuleLoaded then
+		pcall(env.onModuleLoaded, id, env.moduleCount, env.moduleTotal)
+	end
+	return result
+end
+
+local bootCard = nil
+
+local function start()
+	local mountUi = options.headless ~= true and options.ui ~= false
+
+	if mountUi then
+		pcall(function()
+			bootCard = env.require("ui/boot").show()
+		end)
 	end
 
-	local env = createEnv(bootCfg)
+	local lastYield = os.clock()
+	env.onModuleLoaded = function(id, count, total)
+		if bootCard and bootCard.moduleStep then
+			pcall(bootCard.moduleStep, id, count, total)
+		end
+		if os.clock() - lastYield >= 0.03 then
+			task.wait()
+			lastYield = os.clock()
+		end
+	end
+
+	if bootCard then
+		task.wait()
+	end
+
+	local caps = env.require("runtime/caps")
+	env.caps = caps
+	local log = env.require("runtime/log")
 	local dispose = env.require("runtime/dispose")
-	local sdkMod = env.require("embedding/sdk")
+
+	log.info("boot", string.format("VS-RBLX %s (%s) starting -- %s", VERSION, BUILD, caps.summary()))
 
 	local appInstance = nil
-	if not bootCfg.headless then
+	if mountUi then
+		options.splash = bootCard
 		local appMod = env.require("ui/app")
-		appInstance = appMod.mount(bootCfg)
+		appInstance = appMod.mount(options)
+		options.splash = nil
 	else
 		local config = env.require("runtime/config")
 		local workspaceFs = env.require("runtime/workspace_fs")
@@ -176,31 +262,45 @@ local function boot(userOpts)
 		gitState.loadMeta()
 	end
 
-	local api = sdkMod.buildHandle(appInstance, function()
-		if dispose.all then
-			dispose.all()
-		elseif dispose.cleanupAll then
-			dispose.cleanupAll()
+	local sdkMod = env.require("embedding/sdk")
+	local handle
+	handle = sdkMod.buildHandle(appInstance, function()
+		dispose.drain()
+		if appInstance and appInstance.screenGui then
+			pcall(function() appInstance.screenGui:Destroy() end)
+		end
+		if globalTable then
+			pcall(function()
+				if globalTable.VSRBLX == handle then
+					globalTable.VSRBLX = nil
+				end
+			end)
 		end
 	end)
-	if globalHost then
-		globalHost.VSRBLX = api
+
+	env.onModuleLoaded = nil
+	if bootCard then
+		pcall(bootCard.close)
+		bootCard = nil
 	end
-	return api
+
+	if globalTable then
+		pcall(function() globalTable.VSRBLX = handle end)
+	end
+	log.info("boot", "VS-RBLX ready")
+	return handle
 end
 
-local autoBoot = true
-local host = (type(getgenv) == "function" and getgenv()) or _G
-if host and host.VSRBLX_NO_AUTOBOOT == true then
-	autoBoot = false
+local ok, result = pcall(start)
+if not ok then
+	env.onModuleLoaded = nil
+	warn("[vsrblx] failed to start: " .. tostring(result))
+	local disposer = loaded["runtime/dispose"]
+	if disposer then pcall(disposer.drain) end
+	if bootCard and bootCard.fail then
+		pcall(bootCard.fail, result)
+	end
+	return nil
 end
 
-if autoBoot then
-	return boot()
-end
-
-return {
-	version = VERSION,
-	createEnv = createEnv,
-	boot = boot,
-}
+return result

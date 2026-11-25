@@ -37,43 +37,33 @@ return function(env)
 
 	local M = {}
 
-	local function resolveGuiHost()
-		if type(env.gethui) == "function" then
-			local ok, hui = pcall(env.gethui)
-			if ok and hui then return hui end
-		end
-		if env.coreGui then
-			local ok, _ = pcall(function() return env.coreGui.Name end)
-			if ok then return env.coreGui end
-		end
-		if env.plr then
-			local pg = env.plr:FindFirstChild("PlayerGui")
-			if pg then return pg end
-		end
-		return nil
-	end
-
 	function M.mount(opts)
 		opts = opts or {}
-		local splash = bootSplash.show()
-		if splash then splash.step("Loading workspace configuration...", 0.2) end
+		local splash = opts.splash
+		local ownsSplash = false
+		if not splash then
+			pcall(function() splash = bootSplash.show() end)
+			ownsSplash = (splash ~= nil)
+		end
+		if splash then pcall(splash.step, "Loading workspace configuration...", 0.25) end
 
 		config.load()
 		theme.apply()
 
 		bootProgress.update("fs", "Mounting local disk workspace (writefile / readfile)...")
-		if splash then splash.step("Mounting local disk workspace...", 0.45) end
+		if splash then pcall(splash.step, "Mounting local disk workspace...", 0.5) end
 		workspaceFs.init()
 		gitState.loadMeta()
 
-		local guiParent = opts.parent or resolveGuiHost()
 		local screenGui = Instance.new("ScreenGui")
 		screenGui.Name = "VSRBLX_Workbench"
 		screenGui.ResetOnSpawn = false
 		screenGui.IgnoreGuiInset = true
 		screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-		if guiParent then
-			pcall(function() screenGui.Parent = guiParent end)
+		local mountedOk = bootSplash.mountScreenGui(screenGui, opts.parent)
+		if not mountedOk or not screenGui.Parent then
+			pcall(function() screenGui:Destroy() end)
+			error("Nowhere to parent VSRBLX_Workbench ScreenGui (gethui, CoreGui, and PlayerGui all unavailable)", 0)
 		end
 		dispose.add(function()
 			pcall(function() screenGui:Destroy() end)
@@ -82,7 +72,7 @@ return function(env)
 		overlay.mount(screenGui)
 
 		bootProgress.update("ui", "Constructing draggable & player-resizable VS Code window...")
-		if splash then splash.step("Building VS Code workbench...", 0.75) end
+		if splash then pcall(splash.step, "Building VS Code workbench...", 0.85) end
 
 		local win = windowMod.new(screenGui)
 		local palette = commandPaletteMod.new(screenGui)
