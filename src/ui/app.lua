@@ -40,10 +40,8 @@ return function(env)
 	function M.mount(opts)
 		opts = opts or {}
 		local splash = opts.splash
-		local ownsSplash = false
 		if not splash then
 			pcall(function() splash = bootSplash.show() end)
-			ownsSplash = (splash ~= nil)
 		end
 		if splash then pcall(splash.step, "Loading workspace configuration...", 0.25) end
 
@@ -71,6 +69,32 @@ return function(env)
 
 		overlay.mount(screenGui)
 
+		-- Dirty-tab close confirmation handler (VS Code 3-button Save / Don't Save / Cancel)
+		codeStore.dirtyCloseHandler = function(doc)
+			overlay.confirm({
+				title = string.format("Do you want to save the changes you made to %s?", tostring(doc.title)),
+				message = "Your changes will be lost if you don't save them to disk.",
+				primaryText = "Save",
+				secondaryText = "Don't Save",
+				cancelText = "Cancel",
+				onPrimary = function()
+					local ok, err = codeStore.save(doc.id)
+					if ok then
+						codeStore.close(doc.id, { force = true })
+						overlay.toast("Saved and closed " .. tostring(doc.title), "good", 2)
+					else
+						overlay.toast("Save failed: " .. tostring(err), "bad", 4)
+					end
+				end,
+				onSecondary = function()
+					codeStore.close(doc.id, { force = true })
+				end,
+			})
+		end
+		dispose.add(function()
+			codeStore.dirtyCloseHandler = nil
+		end)
+
 		bootProgress.update("ui", "Constructing draggable & player-resizable VS Code window...")
 		if splash then pcall(splash.step, "Building VS Code workbench...", 0.85) end
 
@@ -88,24 +112,28 @@ return function(env)
 		local panelVisible = config.get("workbench.panelVisible", true) ~= false
 		local panelHeight = util.clamp(tonumber(config.get("workbench.panelHeight", 190)) or 190, 100, 420)
 		local activeViewlet = tostring(config.get("workbench.activeViewlet", "explorer"))
+		local zenMode = config.get("workbench.zenMode", false) == true
+		local preZenState = nil
 
-		-- TitleBar (bound to window drag + maximize/minimize/close controls)
+		-- TitleBar (bound to window drag + opacity scrub + maximize/minimize/close controls)
 		local titleBar = titlebarMod.new(win.body, {
 			onMinimize = function() win.minimise() end,
 			onMaximize = function() win.toggleMaximise() end,
 			onClose = function() win.hide() end,
+			onSetOpacity = function(alpha) win.setOpacity(alpha) end,
 		})
 		win.bindDragBar(titleBar.root)
 
 		-- StatusBar
-		statusbarMod.new(win.body)
+		local statusBar = statusbarMod.new(win.body)
 
-		-- Central Body Frame between TitleBar and StatusBar
+		-- Central Body Frame between TitleBar and StatusBar (transparent layout wrapper)
 		local workbenchBody = P.frame(win.body, {
 			name = "WorkbenchBody",
 			size = UDim2.new(1, 0, 1, -(TITLE_H + STATUS_H)),
 			pos = UDim2.fromOffset(0, TITLE_H),
 			bg = theme.color.editor,
+			transparency = 1,
 			clip = true,
 			zIndex = 11,
 		})
@@ -136,10 +164,11 @@ return function(env)
 			settings = settingsPanel.new(sideBarFrame),
 		}
 
-		-- Main Center Stack (Editors on top + Bottom Terminal Panel below)
+		-- Main Center Stack (transparent wrapper over EditorsRegion + BottomPanelContainer)
 		local mainArea = P.frame(workbenchBody, {
 			name = "MainEditorAndPanelStack",
 			bg = theme.color.editor,
+			transparency = 1,
 			clip = true,
 			zIndex = 12,
 		})
@@ -156,11 +185,12 @@ return function(env)
 			name = "PrimaryEditorPane",
 			size = UDim2.fromScale(1, 1),
 			bg = theme.color.editor,
+			transparency = 1,
 			clip = true,
 			zIndex = 12,
 		})
-		tabsMod.new(primaryGroup, "primary")
-		breadcrumbsMod.new(primaryGroup, "primary")
+		local primaryTabs = tabsMod.new(primaryGroup, "primary")
+		local primaryBreadcrumbs = breadcrumbsMod.new(primaryGroup, "primary")
 		local primaryBody = P.frame(primaryGroup, {
 			size = UDim2.new(1, 0, 1, -(TAB_H + CRUMB_H)),
 			pos = UDim2.fromOffset(0, TAB_H + CRUMB_H),
@@ -174,6 +204,7 @@ return function(env)
 			size = UDim2.new(0.5, 0, 1, 0),
 			pos = UDim2.new(0.5, 0, 0, 0),
 			bg = theme.color.editor,
+			transparency = 1,
 			visible = false,
 			clip = true,
 			zIndex = 12,
@@ -183,8 +214,8 @@ return function(env)
 			bg = theme.color.border,
 			zIndex = 30,
 		})
-		tabsMod.new(secondaryGroup, "secondary")
-		breadcrumbsMod.new(secondaryGroup, "secondary")
+		local secondaryTabs = tabsMod.new(secondaryGroup, "secondary")
+		local secondaryBreadcrumbs = breadcrumbsMod.new(secondaryGroup, "secondary")
 		local secondaryBody = P.frame(secondaryGroup, {
 			size = UDim2.new(1, 0, 1, -(TAB_H + CRUMB_H)),
 			pos = UDim2.fromOffset(0, TAB_H + CRUMB_H),
@@ -192,10 +223,31 @@ return function(env)
 		})
 		local secondaryEditor = editorMod.new(secondaryBody, "secondary")
 
-		-- Bottom Panel (`PROBLEMS`, `OUTPUT`, `TERMINAL`, `HTTP / GIT`)
+		-- Floating Zen Mode Exit Pill inside EditorsRegion
+		local zenExitPill = P.button(editorsRegion, {
+			name = "ZenExitPill",
+			size = UDim2.fromOffset(148, 24),
+			pos = UDim2.new(1, -160, 0, TAB_H + 6),
+			bg = theme.color.sideBar,
+			hoverBg = theme.color.accent,
+			color = theme.color.tabActiveText,
+			bold = true,
+			textSize = 11,
+			text = "✦ Zen Mode  •  Exit",
+			radius = 12,
+			border = theme.color.accent,
+			visible = false,
+			zIndex = 65,
+			onClick = function()
+				commands.run("workbench.toggleZenMode")
+			end,
+		})
+
+		-- Bottom Panel (`PROBLEMS`, `TODOS`, `OUTPUT`, `TERMINAL`, `HTTP / GIT`)
 		local panelHolder = P.frame(mainArea, {
 			name = "BottomPanelContainer",
 			bg = theme.color.panelBg,
+			transparency = 1,
 			clip = true,
 			zIndex = 20,
 		})
@@ -228,27 +280,44 @@ return function(env)
 			reflowWorkbench()
 		end)
 
-		reflowWorkbench = function()
-			local effSideW = sideBarVisible and sideBarWidth or 0
-			sideBarFrame.Visible = sideBarVisible
-			sideBarFrame.Size = UDim2.new(0, sideBarWidth, 1, 0)
-			sideSash.Visible = sideBarVisible
-			sideSash.Position = UDim2.fromOffset(ACT_W + sideBarWidth - 2, 0)
+		local actBar
 
-			local leftOffset = ACT_W + effSideW
+		reflowWorkbench = function()
+			local showStatus = not zenMode
+			statusBar.root.Visible = showStatus
+			workbenchBody.Position = UDim2.fromOffset(0, TITLE_H)
+			workbenchBody.Size = UDim2.new(1, 0, 1, -(TITLE_H + (showStatus and STATUS_H or 0)))
+
+			local showAct = not zenMode
+			if actBar then
+				actBar.root.Visible = showAct
+			end
+			local effActW = showAct and ACT_W or 0
+
+			local showSide = (not zenMode) and sideBarVisible
+			local effSideW = showSide and sideBarWidth or 0
+			sideBarFrame.Visible = showSide
+			sideBarFrame.Position = UDim2.fromOffset(effActW, 0)
+			sideBarFrame.Size = UDim2.new(0, sideBarWidth, 1, 0)
+			sideSash.Visible = showSide
+			sideSash.Position = UDim2.fromOffset(effActW + sideBarWidth - 2, 0)
+
+			local leftOffset = effActW + effSideW
 			mainArea.Position = UDim2.fromOffset(leftOffset, 0)
 			mainArea.Size = UDim2.new(1, -leftOffset, 1, 0)
 
-			local effPanelH = panelVisible and panelHeight or 0
-			panelHolder.Visible = panelVisible
+			local showPanel = (not zenMode) and panelVisible
+			local effPanelH = showPanel and panelHeight or 0
+			panelHolder.Visible = showPanel
 			panelHolder.Size = UDim2.new(1, 0, 0, effPanelH)
 			panelHolder.Position = UDim2.new(0, 0, 1, -effPanelH)
 
-			panelSash.Visible = panelVisible
+			panelSash.Visible = showPanel
 			panelSash.Position = UDim2.new(0, 0, 1, -effPanelH - 2)
 
 			editorsRegion.Position = UDim2.fromOffset(0, 0)
 			editorsRegion.Size = UDim2.new(1, 0, 1, -effPanelH)
+			zenExitPill.Visible = zenMode
 
 			if codeStore.splitOpen then
 				primaryGroup.Size = UDim2.new(splitRatio, 0, 1, 0)
@@ -264,8 +333,30 @@ return function(env)
 			end
 		end
 
-		local actBar
+		local function setZenMode(flag)
+			local nextZen = flag == true
+			if nextZen == zenMode then return zenMode end
+			if nextZen then
+				preZenState = {
+					sideBarVisible = sideBarVisible,
+					panelVisible = panelVisible,
+				}
+			elseif preZenState then
+				sideBarVisible = preZenState.sideBarVisible
+				panelVisible = preZenState.panelVisible
+				preZenState = nil
+			end
+			zenMode = nextZen
+			config.set("workbench.zenMode", zenMode)
+			if actBar then actBar.refresh() end
+			reflowWorkbench()
+			return zenMode
+		end
+
 		local function selectViewlet(id, toggleIfSame)
+			if zenMode then
+				setZenMode(false)
+			end
 			if toggleIfSame and sideBarVisible and activeViewlet == id then
 				sideBarVisible = false
 			else
@@ -287,6 +378,27 @@ return function(env)
 		actBar = activitybarMod.new(workbenchBody, function(id)
 			selectViewlet(id, true)
 		end)
+
+		-- Ghost-Coding Opacity propagation (single-layer background transparency across zones)
+		local function applyWindowOpacity(alpha)
+			local clamped = util.clamp(tonumber(alpha) or 1.0, 0.30, 1.0)
+			local bgTrans = 1.0 - clamped
+			titleBar.root.BackgroundTransparency = bgTrans
+			actBar.root.BackgroundTransparency = bgTrans
+			sideBarFrame.BackgroundTransparency = bgTrans
+			editorsRegion.BackgroundTransparency = bgTrans
+			primaryBreadcrumbs.root.BackgroundTransparency = bgTrans
+			secondaryBreadcrumbs.root.BackgroundTransparency = bgTrans
+			statusBar.root.BackgroundTransparency = math.min(0.75, bgTrans)
+			if primaryTabs.setTransparency then primaryTabs.setTransparency(bgTrans) end
+			if secondaryTabs.setTransparency then secondaryTabs.setTransparency(bgTrans) end
+			if primaryEditor.setTransparency then primaryEditor.setTransparency(bgTrans) end
+			if secondaryEditor.setTransparency then secondaryEditor.setTransparency(bgTrans) end
+			if bottomTerminal.setTransparency then bottomTerminal.setTransparency(bgTrans) end
+		end
+
+		win.opacityChanged:connect(applyWindowOpacity)
+		applyWindowOpacity(win.opacity)
 
 		codeStore.changed:connect(reflowWorkbench)
 		win.onResize = reflowWorkbench
@@ -315,7 +427,30 @@ return function(env)
 				win.resetAutoSize()
 			end, { "window.resetSize" })
 
+			reg("workbench.toggleZenMode", "Toggle Zen Mode (Distraction-Free)", "View", "Ctrl+Shift+Z", function()
+				local enabled = setZenMode(not zenMode)
+				overlay.toast(enabled and "Zen Mode enabled (Ctrl+Shift+Z to exit)" or "Exited Zen Mode", "info", 2)
+				return enabled
+			end, { "view.zenMode" })
+
+			reg("window.opacityDown", "Ghost Mode: Decrease Window Opacity (-15%)", "Window", nil, function()
+				local v = win.stepOpacity(-0.15)
+				overlay.toast(string.format("Window opacity: %d%%", math.floor(v * 100 + 0.5)), "info", 1.6)
+				return v
+			end)
+			reg("window.opacityUp", "Ghost Mode: Increase Window Opacity (+15%)", "Window", nil, function()
+				local v = win.stepOpacity(0.15)
+				overlay.toast(string.format("Window opacity: %d%%", math.floor(v * 100 + 0.5)), "info", 1.6)
+				return v
+			end)
+			reg("window.opacityReset", "Ghost Mode: Reset Window Opacity to 100%", "Window", nil, function()
+				local v = win.setOpacity(1.0)
+				overlay.toast("Window opacity reset to 100%", "info", 1.6)
+				return v
+			end)
+
 			reg("workbench.toggleSideBar", "Toggle Primary Side Bar", "View", "Ctrl+B", function()
+				if zenMode then setZenMode(false) end
 				sideBarVisible = not sideBarVisible
 				config.set("workbench.sideBarVisible", sideBarVisible)
 				actBar.refresh()
@@ -323,6 +458,7 @@ return function(env)
 			end, { "view.toggleSidebar" })
 
 			reg("workbench.togglePanel", "Toggle Integrated Terminal & Panel", "View", "Ctrl+J", function()
+				if zenMode then setZenMode(false) end
 				panelVisible = not panelVisible
 				config.set("workbench.panelVisible", panelVisible)
 				reflowWorkbench()
@@ -330,10 +466,18 @@ return function(env)
 			end, { "view.togglePanel" })
 
 			reg("workbench.showProblems", "Focus Problems Panel", "View", nil, function()
+				if zenMode then setZenMode(false) end
 				panelVisible = true
 				bottomTerminal.selectTab("problems")
 				reflowWorkbench()
 			end, { "view.problems" })
+
+			reg("workbench.showTodos", "Show Workspace TODOs & FIXMEs", "View", "Ctrl+Shift+M", function()
+				if zenMode then setZenMode(false) end
+				panelVisible = true
+				bottomTerminal.selectTab("todos")
+				reflowWorkbench()
+			end, { "view.todos" })
 
 			reg("workbench.viewExplorer", "Show Explorer", "View", "Ctrl+Shift+E", function()
 				selectViewlet("explorer", false)
@@ -362,12 +506,22 @@ return function(env)
 			reg("file.newUntitled", "New Untitled Scratch Buffer", "File", "Ctrl+N", function()
 				codeStore.newUntitled("", "luau")
 			end)
-			reg("file.newDiskFile", "New File on Local Disk...", "File", nil, function()
-				viewlets.explorer.fileTree.promptNewFile()
+			reg("file.newDiskFile", "New File in Explorer (Inline)...", "File", nil, function()
+				selectViewlet("explorer", false)
+				viewlets.explorer.fileTree.promptNewFile("")
 			end)
-			reg("file.newDiskFolder", "New Folder on Local Disk...", "File", nil, function()
-				viewlets.explorer.fileTree.promptNewFolder()
+			reg("file.newDiskFolder", "New Folder in Explorer (Inline)...", "File", nil, function()
+				selectViewlet("explorer", false)
+				viewlets.explorer.fileTree.promptNewFolder("")
 			end, { "file.newFolder" })
+
+			reg("file.rename", "Rename Active File in Explorer", "File", "F2", function()
+				local doc = codeStore.active()
+				if doc and doc.path ~= "" and not doc.untitled then
+					selectViewlet("explorer", false)
+					viewlets.explorer.fileTree.startRename(doc.path)
+				end
+			end)
 
 			reg("file.save", "Save Active File to Disk (writefile)", "File", "Ctrl+S", function()
 				local doc = codeStore.active()
@@ -379,7 +533,7 @@ return function(env)
 						mono = true,
 						confirmText = "Save",
 						onConfirm = function(p)
-							local ok, err = codeStore.saveAs(doc.id, p)
+							local ok, err = codeStore.save(doc.id, { saveAsPath = p })
 							if ok then overlay.toast("Saved " .. p .. " via writefile", "good", 2.5)
 							else overlay.toast("Save failed: " .. tostring(err), "bad", 4) end
 						end,
@@ -398,7 +552,7 @@ return function(env)
 
 			reg("file.closeTab", "Close Active Editor Tab", "View", "Ctrl+W", function()
 				local doc = codeStore.active()
-				if doc then codeStore.close(doc.id) end
+				if doc then codeStore.requestClose(doc.id) end
 			end)
 
 			reg("edit.undo", "Undo", "Edit", "Ctrl+Z", function()
@@ -443,6 +597,7 @@ return function(env)
 			end)
 
 			reg("run.activeFile", "Execute Active Luau Script", "Run", "F5", function()
+				if zenMode then setZenMode(false) end
 				panelVisible = true
 				bottomTerminal.selectTab("output")
 				reflowWorkbench()
@@ -536,8 +691,11 @@ return function(env)
 		local function bindShortcuts()
 			shortcuts.bind({ key = "RightShift" }, "workbench.toggleWindow", true)
 			shortcuts.bind({ key = "F11" }, "window.maximize", true)
+			shortcuts.bind({ ctrl = true, shift = true, key = "Z" }, "workbench.toggleZenMode", true)
+			shortcuts.bind({ ctrl = true, shift = true, key = "M" }, "workbench.showTodos", true)
 			shortcuts.bind({ ctrl = true, shift = true, key = "P" }, "workbench.commandPalette", true)
 			shortcuts.bind({ key = "F1" }, "workbench.commandPalette", true)
+			shortcuts.bind({ key = "F2" }, "file.rename", true)
 			shortcuts.bind({ ctrl = true, key = "P" }, "workbench.quickOpen", true)
 			shortcuts.bind({ ctrl = true, key = "B" }, "workbench.toggleSideBar", true)
 			shortcuts.bind({ ctrl = true, key = "J" }, "workbench.togglePanel", true)
@@ -575,19 +733,19 @@ return function(env)
 			codeStore.openFile("src/init.luau")
 		end
 
-		selectViewlet(activeViewlet, false)
+		for k, v in pairs(viewlets) do
+			v.root.Visible = (k == activeViewlet)
+		end
 		reflowWorkbench()
 
 		theme.changed:connect(function()
-			workbenchBody.BackgroundColor3 = theme.color.editor
 			sideBarFrame.BackgroundColor3 = theme.color.sideBar
 			sideRightBorder.BackgroundColor3 = theme.color.border
-			mainArea.BackgroundColor3 = theme.color.editor
 			editorsRegion.BackgroundColor3 = theme.color.editor
-			primaryGroup.BackgroundColor3 = theme.color.editor
-			secondaryGroup.BackgroundColor3 = theme.color.editor
 			splitLeftRule.BackgroundColor3 = theme.color.border
-			panelHolder.BackgroundColor3 = theme.color.panelBg
+			zenExitPill.BackgroundColor3 = theme.color.sideBar
+			zenExitPill.TextColor3 = theme.color.tabActiveText
+			applyWindowOpacity(win.opacity)
 		end)
 
 		bootProgress.update("ready", "VS-RBLX Workbench ready.")
@@ -596,11 +754,16 @@ return function(env)
 		return {
 			screenGui = screenGui,
 			window = win,
+			titleBar = titleBar,
+			statusBar = statusBar,
+			viewlets = viewlets,
 			palette = palette,
 			primaryEditor = primaryEditor,
 			secondaryEditor = secondaryEditor,
 			terminal = bottomTerminal,
 			selectViewlet = selectViewlet,
+			setZenMode = setZenMode,
+			isZenMode = function() return zenMode end,
 		}
 	end
 

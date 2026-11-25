@@ -25,6 +25,7 @@ return function(env)
 			name = "EditorGroup_" .. pane,
 			size = UDim2.fromScale(1, 1),
 			bg = theme.color.editor,
+			transparency = 1,
 			clip = true,
 			zIndex = 12,
 		})
@@ -36,6 +37,7 @@ return function(env)
 			name = "CodeSurface",
 			size = UDim2.fromScale(1, 1),
 			bg = theme.color.editor,
+			transparency = 1,
 			clip = true,
 			zIndex = 13,
 		})
@@ -44,6 +46,7 @@ return function(env)
 			name = "EditorScroll",
 			size = UDim2.new(1, -72, 1, 0),
 			bg = theme.color.editor,
+			transparency = 1,
 			direction = Enum.ScrollingDirection.XY,
 			autoCanvas = Enum.AutomaticSize.None,
 			barThickness = 8,
@@ -612,6 +615,10 @@ return function(env)
 			end,
 			refresh = function()
 				mountDoc(codeStore.active(pane))
+			end,
+			setTransparency = function(bgTrans)
+				gutter.BackgroundTransparency = bgTrans
+				activeLineHighlight.BackgroundTransparency = math.min(0.92, bgTrans + 0.25)
 			end,
 		}
 	end

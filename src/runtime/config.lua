@@ -18,6 +18,7 @@ return function(env)
 			activePanelTab = "terminal",
 			statusBarVisible = true,
 			breadcrumbs = true,
+			zenMode = false,
 		},
 		editor = {
 			fontSize = 14,
@@ -52,6 +53,7 @@ return function(env)
 			placed = false,
 			customSize = false,
 			maximised = false,
+			opacity = 1.0,
 			width = 980,
 			height = 620,
 			x = 0,

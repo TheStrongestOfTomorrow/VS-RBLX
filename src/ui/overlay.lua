@@ -258,6 +258,121 @@ return function(env)
 		return backdrop, field
 	end
 
+	function M.confirm(spec)
+		M.closeModal()
+		if not M.layer then return end
+		spec = spec or {}
+
+		local backdrop = P.button(M.layer, {
+			name = "ConfirmBackdrop",
+			size = UDim2.fromScale(1, 1),
+			bg = Color3.fromRGB(0, 0, 0),
+			transparency = 0.45,
+			text = "",
+			zIndex = 230,
+			onClick = function()
+				M.closeModal()
+				if spec.onCancel then spec.onCancel() end
+			end,
+		})
+
+		local card = P.frame(backdrop, {
+			name = "ConfirmModal",
+			size = UDim2.fromOffset(spec.width or 430, spec.height or 142),
+			pos = UDim2.new(0.5, 0, 0.36, 0),
+			anchor = Vector2.new(0.5, 0.5),
+			bg = theme.color.sideBar,
+			radius = 6,
+			border = theme.color.border,
+			active = true,
+			zIndex = 235,
+		})
+		P.pad(card, 14, 16, 14, 16)
+
+		P.label(card, {
+			name = "ConfirmTitle",
+			size = UDim2.new(1, 0, 0, 22),
+			text = spec.title or "Confirm Action",
+			bold = true,
+			textSize = 13,
+			color = theme.color.tabActiveText,
+			truncate = true,
+			zIndex = 236,
+		})
+
+		P.label(card, {
+			name = "ConfirmMessage",
+			size = UDim2.new(1, 0, 0, 38),
+			pos = UDim2.fromOffset(0, 26),
+			text = spec.message or "",
+			wrap = true,
+			textSize = 12,
+			color = theme.color.muted,
+			alignY = Enum.TextYAlignment.Top,
+			zIndex = 236,
+		})
+
+		local actions = P.frame(card, {
+			name = "ConfirmActions",
+			size = UDim2.new(1, 0, 0, 28),
+			pos = UDim2.new(0, 0, 1, -28),
+			zIndex = 236,
+		})
+		P.list(actions, Enum.FillDirection.Horizontal, 8, Enum.HorizontalAlignment.Right)
+
+		P.button(actions, {
+			name = "ConfirmCancelBtn",
+			size = UDim2.fromOffset(74, 26),
+			bg = theme.color.inputBg,
+			hoverBg = theme.color.hover,
+			text = spec.cancelText or "Cancel",
+			radius = 4,
+			order = 1,
+			zIndex = 237,
+			onClick = function()
+				M.closeModal()
+				if spec.onCancel then spec.onCancel() end
+			end,
+		})
+
+		if spec.secondaryText then
+			P.button(actions, {
+				name = "ConfirmSecondaryBtn",
+				size = UDim2.fromOffset(92, 26),
+				bg = theme.color.inputBg,
+				hoverBg = theme.color.bad,
+				text = spec.secondaryText,
+				radius = 4,
+				order = 2,
+				zIndex = 237,
+				onClick = function()
+					M.closeModal()
+					if spec.onSecondary then spec.onSecondary() end
+				end,
+			})
+		end
+
+		P.button(actions, {
+			name = "ConfirmPrimaryBtn",
+			size = UDim2.fromOffset(96, 26),
+			bg = theme.color.accent,
+			hoverBg = theme.color.accentHover,
+			color = Color3.fromRGB(255, 255, 255),
+			bold = true,
+			text = spec.primaryText or "Save",
+			radius = 4,
+			order = 3,
+			zIndex = 237,
+			onClick = function()
+				M.closeModal()
+				if spec.onPrimary then spec.onPrimary() end
+			end,
+		})
+
+		M.activeModal = backdrop
+		return backdrop, card
+	end
+
 	function M.toast(message, kind, durationSec)
 		if not M.toastStack then return end
 		local stripeColor = theme.color.accent

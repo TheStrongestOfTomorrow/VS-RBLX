@@ -11,6 +11,7 @@ return function(env)
 	local languages = env.require("runtime/languages")
 	local codeStore = env.require("runtime/code_store")
 	local diagnostics = env.require("runtime/diagnostics")
+	local todoScanner = env.require("runtime/todo_scanner")
 	local gitState = env.require("runtime/git_state")
 	local githubSync = env.require("tools/github_sync")
 	local commands = env.require("runtime/command_catalog")
@@ -78,13 +79,24 @@ return function(env)
 
 		local problemsBtn = P.button(leftRow, {
 			name = "ProblemsBadge",
-			size = UDim2.fromOffset(74, h),
+			size = UDim2.fromOffset(72, h),
 			color = theme.color.statusBarText,
 			textSize = 11,
 			text = "⊗ 0  ⚠ 0",
 			order = 4,
 			zIndex = 32,
 			onClick = function() commands.run("view.problems") end,
+		})
+
+		local todosBtn = P.button(leftRow, {
+			name = "TodosBadge",
+			size = UDim2.fromOffset(66, h),
+			color = theme.color.statusBarText,
+			textSize = 11,
+			text = "✓ 0 TODO",
+			order = 5,
+			zIndex = 32,
+			onClick = function() commands.run("view.todos") end,
 		})
 
 		local rightRow = P.frame(bar, {
@@ -188,18 +200,22 @@ return function(env)
 
 			local _, errs, warns = diagnostics.all()
 			problemsBtn.Text = string.format("⊗ %d  ⚠ %d", errs, warns)
+
+			local _, todoCounts = todoScanner.scanAll()
+			todosBtn.Text = string.format("✓ %d TODO", todoCounts.total or 0)
 		end
 
 		codeStore.changed:connect(refresh)
 		codeStore.cursorChanged:connect(refresh)
 		diagnostics.changed:connect(refresh)
+		todoScanner.changed:connect(refresh)
 		gitState.changed:connect(refresh)
 		githubSync.progress:connect(refresh)
 		config.changed:connect(refresh)
 		theme.changed:connect(function()
 			bar.BackgroundColor3 = theme.color.statusBar
 			hostPill.BackgroundColor3 = theme.color.statusBarRemote
-			for _, w in ipairs({ hostPill, branchBtn, syncBtn, problemsBtn, cursorLbl, indentBtn, utfLbl, langBtn }) do
+			for _, w in ipairs({ hostPill, branchBtn, syncBtn, problemsBtn, todosBtn, cursorLbl, indentBtn, utfLbl, langBtn }) do
 				w.TextColor3 = theme.color.statusBarText
 			end
 		end)

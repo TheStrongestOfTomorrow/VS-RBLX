@@ -3,6 +3,7 @@
 return function(env)
 	local P = env.require("ui/primitives")
 	local theme = env.require("ui/theme")
+	local icons = env.require("ui/icons")
 	local explorerTreeMod = env.require("ui/code/explorer")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
@@ -25,7 +26,7 @@ return function(env)
 			zIndex = 22,
 		})
 		P.label(titleRow, {
-			size = UDim2.new(1, -110, 1, 0),
+			size = UDim2.new(1, -112, 1, 0),
 			pos = UDim2.fromOffset(12, 0),
 			text = "EXPLORER",
 			bold = true,
@@ -35,62 +36,53 @@ return function(env)
 		})
 
 		local toolRow = P.frame(titleRow, {
-			size = UDim2.fromOffset(102, 26),
-			pos = UDim2.new(1, -106, 0, 2),
+			size = UDim2.fromOffset(104, 26),
+			pos = UDim2.new(1, -108, 0, 2),
 			zIndex = 23,
 		})
 		P.list(toolRow, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
 
 		local fileTree = nil
+		local toolBtns = {}
 
-		P.button(toolRow, {
-			name = "NewFileBtn",
-			size = UDim2.fromOffset(24, 22),
-			text = "+F",
-			bold = true,
-			textSize = 10,
-			radius = 3,
-			order = 1,
-			zIndex = 24,
-			onClick = function() if fileTree then fileTree.promptNewFile() end end,
-		})
-		P.button(toolRow, {
-			name = "NewFolderBtn",
-			size = UDim2.fromOffset(24, 22),
-			text = "+D",
-			bold = true,
-			textSize = 10,
-			radius = 3,
-			order = 2,
-			zIndex = 24,
-			onClick = function() if fileTree then fileTree.promptNewFolder() end end,
-		})
-		P.button(toolRow, {
-			name = "ReloadDiskBtn",
-			size = UDim2.fromOffset(24, 22),
-			text = "↻",
-			textSize = 12,
-			radius = 3,
-			order = 3,
-			zIndex = 24,
-			onClick = function()
-				fsSync.reloadFromDisk()
-				overlay.toast("Synced with local disk", "good", 2)
-			end,
-		})
-		P.button(toolRow, {
-			name = "SaveAllBtn",
-			size = UDim2.fromOffset(24, 22),
-			text = "💾",
-			textSize = 11,
-			radius = 3,
-			order = 4,
-			zIndex = 24,
-			onClick = function()
-				local n = codeStore.saveAll()
-				overlay.toast(string.format("Saved %d file(s) to disk", n), "good", 2)
-			end,
-		})
+		local function makeToolBtn(name, iconName, order, onClick)
+			local btn = P.button(toolRow, {
+				name = name,
+				size = UDim2.fromOffset(24, 22),
+				text = "",
+				radius = 3,
+				order = order,
+				zIndex = 24,
+				onClick = onClick,
+			})
+			toolBtns[#toolBtns + 1] = { btn = btn, icon = iconName }
+			return btn
+		end
+
+		local function redrawToolbarIcons()
+			for _, spec in ipairs(toolBtns) do
+				spec.btn:ClearAllChildren()
+				P.corner(spec.btn, 3)
+				local ic = icons.codicon(spec.btn, spec.icon, 15, theme.color.sideBarText, 25)
+				ic.Position = UDim2.fromOffset(4, 3)
+			end
+		end
+
+		makeToolBtn("NewFileBtn", "newFile", 1, function()
+			if fileTree then fileTree.promptNewFile("") end
+		end)
+		makeToolBtn("NewFolderBtn", "newFolder", 2, function()
+			if fileTree then fileTree.promptNewFolder("") end
+		end)
+		makeToolBtn("ReloadDiskBtn", "refresh", 3, function()
+			fsSync.reloadFromDisk()
+			overlay.toast("Synced with local disk", "good", 2)
+		end)
+		makeToolBtn("SaveAllBtn", "saveAll", 4, function()
+			local n = codeStore.saveAll()
+			overlay.toast(string.format("Saved %d file(s) to disk", n), "good", 2)
+		end)
+		redrawToolbarIcons()
 
 		local scroll = P.scroll(root, {
 			name = "ExplorerScroll",
@@ -101,9 +93,13 @@ return function(env)
 		P.list(scroll, Enum.FillDirection.Vertical, 2)
 
 		-- Section 1: Open Editors
-		local openHeader = P.frame(scroll, {
+		local openExpanded = true
+		local openHeader = P.button(scroll, {
+			name = "OpenEditorsHeader",
 			size = UDim2.new(1, 0, 0, 22),
 			bg = theme.color.sideBarHeader,
+			hoverBg = theme.color.hover,
+			text = "",
 			order = 1,
 			zIndex = 23,
 		})
@@ -183,7 +179,7 @@ return function(env)
 			P.list(gameContainer, Enum.FillDirection.Vertical, 1)
 			local ord = 0
 
-			local function walkInst(inst, labelName, depth)
+			local function walkInst(inst, _labelName, depth)
 				if depth > 5 or ord > 80 then return end
 				for _, ch in ipairs(robloxExplorer.childrenOf(inst, 40)) do
 					ord = ord + 1
@@ -246,27 +242,55 @@ return function(env)
 
 		local function renderOpenEditors()
 			openList:ClearAllChildren()
+			openList.Visible = openExpanded
+			local arrow = openExpanded and "▾" or "▸"
+			openHeaderLbl.Text = string.format("%s OPEN EDITORS (%d)", arrow, #codeStore.tabs)
+			if not openExpanded then return end
+
 			P.list(openList, Enum.FillDirection.Vertical, 1)
-			openHeaderLbl.Text = string.format("▾ OPEN EDITORS (%d)", #codeStore.tabs)
 			local activeDoc = codeStore.active()
 			for idx, tab in ipairs(codeStore.tabs) do
 				local isCur = activeDoc and activeDoc.id == tab.id
 				local row = P.button(openList, {
+					name = "OpenEditor_" .. tab.title,
 					size = UDim2.new(1, 0, 0, 21),
 					bg = isCur and theme.color.listActive or nil,
 					hoverBg = theme.color.hover,
-					alignX = Enum.TextXAlignment.Left,
-					textSize = 12,
-					color = isCur and theme.color.tabActiveText or theme.color.sideBarText,
-					text = "    " .. (tab.dirty and "● " or "  ") .. tab.title,
+					text = "",
 					order = idx,
 					zIndex = 24,
 					activeState = function() return isCur end,
 					onClick = function() codeStore.activate(tab.id) end,
 				})
-				row.TextTruncate = Enum.TextTruncate.AtEnd
+				P.button(row, {
+					name = "CloseOpenEditorBtn",
+					size = UDim2.fromOffset(16, 16),
+					pos = UDim2.fromOffset(6, 2),
+					text = tab.dirty and "●" or "✕",
+					textSize = tab.dirty and 10 or 9,
+					color = tab.dirty and theme.color.tabActiveText or theme.color.muted,
+					radius = 2,
+					zIndex = 25,
+					onClick = function() codeStore.requestClose(tab.id) end,
+				})
+				local badge = icons.fileBadge(row, tab.path ~= "" and tab.path or tab.langId, false, 25)
+				badge.Position = UDim2.fromOffset(24, 3)
+				P.label(row, {
+					size = UDim2.new(1, -50, 1, 0),
+					pos = UDim2.fromOffset(46, 0),
+					text = tab.title,
+					textSize = 12,
+					color = isCur and theme.color.tabActiveText or theme.color.sideBarText,
+					truncate = true,
+					zIndex = 25,
+				})
 			end
 		end
+
+		openHeader.Activated:Connect(function()
+			openExpanded = not openExpanded
+			renderOpenEditors()
+		end)
 
 		codeStore.changed:connect(renderOpenEditors)
 		workspaceFs.changed:connect(function()
@@ -276,6 +300,7 @@ return function(env)
 			openHeader.BackgroundColor3 = theme.color.sideBarHeader
 			wsHeader.BackgroundColor3 = theme.color.sideBarHeader
 			gameBtn.BackgroundColor3 = theme.color.sideBarHeader
+			redrawToolbarIcons()
 			renderOpenEditors()
 			if gameExpanded then renderGameTree() end
 		end)

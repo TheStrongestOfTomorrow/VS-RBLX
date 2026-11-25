@@ -1,10 +1,11 @@
--- VS Code Bottom Integrated Panel with PROBLEMS, OUTPUT, TERMINAL, and HTTP/GIT tabs.
+-- VS Code Bottom Integrated Panel with PROBLEMS, TODOS, OUTPUT, TERMINAL, and HTTP/GIT tabs.
 return function(env)
 	local P = env.require("ui/primitives")
 	local theme = env.require("ui/theme")
 	local config = env.require("runtime/config")
 	local log = env.require("runtime/log")
 	local diagnostics = env.require("runtime/diagnostics")
+	local todoScanner = env.require("runtime/todo_scanner")
 	local codeStore = env.require("runtime/code_store")
 	local http = env.require("net/http")
 	local terminalCmds = env.require("tools/terminal_cmds")
@@ -13,6 +14,7 @@ return function(env)
 
 	local TABS = {
 		{ id = "problems", label = "PROBLEMS" },
+		{ id = "todos", label = "TODOS" },
 		{ id = "output", label = "OUTPUT" },
 		{ id = "terminal", label = "TERMINAL" },
 		{ id = "http", label = "HTTP / GIT" },
@@ -45,7 +47,7 @@ return function(env)
 			pos = UDim2.fromOffset(10, 0),
 			zIndex = 22,
 		})
-		P.list(tabRow, Enum.FillDirection.Horizontal, 14, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+		P.list(tabRow, Enum.FillDirection.Horizontal, 10, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 
 		local tabButtons = {}
 		local activeTab = config.get("workbench.activePanelTab", "terminal")
@@ -54,9 +56,9 @@ return function(env)
 			name = "PanelBody",
 			size = UDim2.new(1, 0, 1, -29),
 			pos = UDim2.fromOffset(0, 29),
-			bg = theme.color.panelBg,
 			zIndex = 21,
 		})
+		bodyArea.BackgroundTransparency = 1
 
 		-- Clear & Close panel buttons
 		local rightBtns = P.frame(header, {
@@ -100,12 +102,68 @@ return function(env)
 		P.pad(problemsScroll, 6, 8, 6, 8)
 		P.list(problemsScroll, Enum.FillDirection.Vertical, 2)
 
-		-- 2. OUTPUT view
+		-- 2. TODOS view (with filter chips + 1-click line jump)
+		local todosPane = P.frame(bodyArea, { name = "TodosView", size = UDim2.fromScale(1, 1), visible = false, zIndex = 22 })
+		local todoFilterRow = P.frame(todosPane, {
+			name = "TodoFilterBar",
+			size = UDim2.new(1, 0, 0, 24),
+			pos = UDim2.fromOffset(8, 3),
+			zIndex = 23,
+		})
+		P.list(todoFilterRow, Enum.FillDirection.Horizontal, 6, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+
+		local todosScroll = P.scroll(todosPane, {
+			name = "TodosScroll",
+			size = UDim2.new(1, 0, 1, -28),
+			pos = UDim2.fromOffset(0, 28),
+			zIndex = 23,
+		})
+		P.pad(todosScroll, 4, 8, 6, 8)
+		P.list(todosScroll, Enum.FillDirection.Vertical, 2)
+
+		local activeTodoFilter = "all"
+		local renderTodos
+
+		local FILTER_CHIPS = {
+			{ id = "all", label = "All" },
+			{ id = "fixme", label = "FIXME / BUG" },
+			{ id = "todo", label = "TODO / HACK" },
+			{ id = "note", label = "NOTE" },
+		}
+		local filterBtns = {}
+		for idx, chip in ipairs(FILTER_CHIPS) do
+			local fb = P.button(todoFilterRow, {
+				name = "TodoFilter_" .. chip.id,
+				size = UDim2.fromOffset(#chip.label * 6 + 20, 20),
+				bg = chip.id == activeTodoFilter and theme.color.listActive or theme.color.inputBg,
+				hoverBg = theme.color.hover,
+				text = chip.label,
+				textSize = 10,
+				bold = true,
+				color = theme.color.sideBarText,
+				radius = 10,
+				order = idx,
+				zIndex = 24,
+				activeState = function() return chip.id == activeTodoFilter end,
+				onClick = function()
+					activeTodoFilter = chip.id
+					for fid, b in pairs(filterBtns) do
+						b.BackgroundColor3 = (fid == activeTodoFilter) and theme.color.listActive or theme.color.inputBg
+						b.BackgroundTransparency = 0
+					end
+					if renderTodos then renderTodos() end
+				end,
+			})
+			fb.BackgroundTransparency = 0
+			filterBtns[chip.id] = fb
+		end
+
+		-- 3. OUTPUT view
 		local outputScroll = P.scroll(bodyArea, { name = "OutputView", visible = false, zIndex = 22 })
 		P.pad(outputScroll, 6, 8, 6, 8)
 		P.list(outputScroll, Enum.FillDirection.Vertical, 1)
 
-		-- 3. TERMINAL view
+		-- 4. TERMINAL view
 		local termPane = P.frame(bodyArea, { name = "TerminalView", size = UDim2.fromScale(1, 1), visible = false, zIndex = 22 })
 		local termScroll = P.scroll(termPane, {
 			name = "TerminalScroll",
@@ -148,19 +206,23 @@ return function(env)
 			end
 		end)
 
-		-- 4. HTTP / GIT view
+		-- 5. HTTP / GIT view
 		local httpScroll = P.scroll(bodyArea, { name = "HttpView", visible = false, zIndex = 22 })
 		P.pad(httpScroll, 6, 8, 6, 8)
 		P.list(httpScroll, Enum.FillDirection.Vertical, 2)
+
+		local function updateTabButtonWidth(btn, txt)
+			if not btn then return end
+			btn.Text = txt
+			btn.Size = UDim2.fromOffset(#txt * 7 + 16, 26)
+		end
 
 		local function renderProblems()
 			problemsScroll:ClearAllChildren()
 			P.pad(problemsScroll, 6, 8, 6, 8)
 			P.list(problemsScroll, Enum.FillDirection.Vertical, 2)
 			local list, errs, warns = diagnostics.all()
-			if tabButtons.problems then
-				tabButtons.problems.Text = string.format("PROBLEMS (%d)", errs + warns)
-			end
+			updateTabButtonWidth(tabButtons.problems, string.format("PROBLEMS (%d)", errs + warns))
 			if #list == 0 then
 				P.label(problemsScroll, {
 					size = UDim2.new(1, 0, 0, 22),
@@ -198,6 +260,85 @@ return function(env)
 					end,
 				})
 				row.TextTruncate = Enum.TextTruncate.AtEnd
+			end
+		end
+
+		renderTodos = function()
+			local items, counts = todoScanner.scanAll()
+			updateTabButtonWidth(tabButtons.todos, string.format("TODOS (%d)", counts.total or 0))
+			if activeTab ~= "todos" then return end
+
+			todosScroll:ClearAllChildren()
+			P.pad(todosScroll, 4, 8, 6, 8)
+			P.list(todosScroll, Enum.FillDirection.Vertical, 2)
+
+			local shown = 0
+			for idx, item in ipairs(items) do
+				if activeTodoFilter == "all" or item.group == activeTodoFilter then
+					shown = shown + 1
+					local badgeCol = theme.color.warn
+					if item.group == "fixme" then
+						badgeCol = theme.color.bad
+					elseif item.group == "note" then
+						badgeCol = Color3.fromRGB(79, 193, 255)
+					end
+
+					local row = P.button(todosScroll, {
+						name = "TodoItem_" .. tostring(shown),
+						size = UDim2.new(1, 0, 0, 22),
+						hoverBg = theme.color.hover,
+						text = "",
+						order = idx,
+						zIndex = 24,
+						onClick = function()
+							if item.docId and codeStore.get(item.docId) then
+								codeStore.activate(item.docId)
+								codeStore.jumpToLine(item.docId, item.line or 1, item.col or 1)
+							elseif item.path and item.path ~= "" then
+								codeStore.openFile(item.path, { line = item.line or 1, col = item.col or 1 })
+							end
+						end,
+					})
+					local pill = P.frame(row, {
+						size = UDim2.fromOffset(48, 16),
+						pos = UDim2.fromOffset(4, 3),
+						bg = badgeCol,
+						transparency = 0.78,
+						border = badgeCol,
+						radius = 3,
+						zIndex = 25,
+					})
+					P.label(pill, {
+						size = UDim2.fromScale(1, 1),
+						text = item.tag,
+						mono = true,
+						bold = true,
+						textSize = 10,
+						color = badgeCol,
+						alignX = Enum.TextXAlignment.Center,
+						zIndex = 26,
+					})
+					P.label(row, {
+						size = UDim2.new(1, -62, 1, 0),
+						pos = UDim2.fromOffset(60, 0),
+						mono = true,
+						textSize = 12,
+						color = theme.color.editorText,
+						text = string.format("%s:%d — %s", tostring(item.path or "buffer"), item.line or 1, item.message),
+						truncate = true,
+						zIndex = 25,
+					})
+				end
+			end
+
+			if shown == 0 then
+				P.label(todosScroll, {
+					size = UDim2.new(1, 0, 0, 22),
+					text = "No TODO / FIXME / NOTE comments found for this filter.",
+					color = theme.color.muted,
+					textSize = 12,
+					zIndex = 24,
+				})
 			end
 		end
 
@@ -287,6 +428,7 @@ return function(env)
 			activeTab = id
 			config.set("workbench.activePanelTab", id, { quiet = true })
 			problemsScroll.Visible = (id == "problems")
+			todosPane.Visible = (id == "todos")
 			outputScroll.Visible = (id == "output")
 			termPane.Visible = (id == "terminal")
 			httpScroll.Visible = (id == "http")
@@ -294,6 +436,7 @@ return function(env)
 				btn.TextColor3 = (tid == id) and theme.color.tabActiveText or theme.color.muted
 			end
 			if id == "problems" then renderProblems()
+			elseif id == "todos" then renderTodos()
 			elseif id == "output" then renderOutput()
 			elseif id == "terminal" then renderTerminal()
 			elseif id == "http" then renderHttp() end
@@ -302,7 +445,7 @@ return function(env)
 		for idx, spec in ipairs(TABS) do
 			local btn = P.button(tabRow, {
 				name = "PanelTab_" .. spec.id,
-				size = UDim2.fromOffset(#spec.label * 7 + 26, 26),
+				size = UDim2.fromOffset(#spec.label * 7 + 20, 26),
 				text = spec.label,
 				bold = true,
 				textSize = 11,
@@ -315,6 +458,7 @@ return function(env)
 		end
 
 		diagnostics.changed:connect(renderProblems)
+		todoScanner.changed:connect(renderTodos)
 		log.added:connect(function() if activeTab == "output" then renderOutput() end end)
 		log.cleared:connect(renderOutput)
 		terminalCmds.changed:connect(renderTerminal)
@@ -323,18 +467,29 @@ return function(env)
 			root.BackgroundColor3 = theme.color.panelBg
 			topRule.BackgroundColor3 = theme.color.border
 			header.BackgroundColor3 = theme.color.panelHeader
-			bodyArea.BackgroundColor3 = theme.color.panelBg
 			promptRow.BackgroundColor3 = theme.color.sideBar
 			promptGlyph.TextColor3 = theme.color.accent
+			for fid, b in pairs(filterBtns) do
+				b.BackgroundColor3 = (fid == activeTodoFilter) and theme.color.listActive or theme.color.inputBg
+				b.TextColor3 = theme.color.sideBarText
+			end
 			selectTab(activeTab)
 		end)
 
 		renderProblems()
+		renderTodos()
 		selectTab(activeTab)
 
 		return {
 			root = root,
+			header = header,
+			promptRow = promptRow,
 			selectTab = selectTab,
+			setTransparency = function(bgTrans)
+				root.BackgroundTransparency = bgTrans
+				header.BackgroundTransparency = bgTrans
+				promptRow.BackgroundTransparency = bgTrans
+			end,
 			focusTerminal = function()
 				selectTab("terminal")
 				task.defer(function() pcall(function() termInput:CaptureFocus() end) end)
