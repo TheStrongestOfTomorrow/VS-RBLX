@@ -538,12 +538,72 @@ return function(env)
 		"light_plus",
 	}
 
+	local CUSTOM_ORDER = {}
+
+	function M.registerCustomTheme(themeId, spec)
+		if type(themeId) ~= "string" or themeId == "" or type(spec) ~= "table" then return false end
+		local basePal = (spec.isLight == true) and PALETTES.light_plus or PALETTES.dark_plus
+		local built = {
+			name = tostring(spec.name or spec.label or themeId),
+			isLight = spec.isLight == true,
+			isCustom = true,
+			syntax = {},
+		}
+		for k, v in pairs(basePal) do
+			if k ~= "syntax" and k ~= "name" and k ~= "isLight" then
+				built[k] = v
+			end
+		end
+		for k, v in pairs(basePal.syntax) do
+			built.syntax[k] = v
+		end
+		if type(spec.colors) == "table" then
+			for k, hexStr in pairs(spec.colors) do
+				if type(hexStr) == "string" and hexStr:match("^#%x%x%x%x%x%x$") and built[k] ~= nil then
+					built[k] = hex(hexStr)
+				end
+			end
+		end
+		if type(spec.syntax) == "table" then
+			for k, hexStr in pairs(spec.syntax) do
+				if type(hexStr) == "string" and hexStr:match("^#%x%x%x%x%x%x$") and built.syntax[k] ~= nil then
+					built.syntax[k] = hexStr
+				end
+			end
+		end
+		PALETTES[themeId] = built
+		local found = false
+		for _, id in ipairs(CUSTOM_ORDER) do
+			if id == themeId then found = true; break end
+		end
+		if not found then CUSTOM_ORDER[#CUSTOM_ORDER + 1] = themeId end
+		return true
+	end
+
+	function M.unregisterCustomTheme(themeId)
+		if not PALETTES[themeId] or not PALETTES[themeId].isCustom then return false end
+		PALETTES[themeId] = nil
+		for i = #CUSTOM_ORDER, 1, -1 do
+			if CUSTOM_ORDER[i] == themeId then table.remove(CUSTOM_ORDER, i) end
+		end
+		if M.activeId == themeId then
+			M.apply("dark_plus")
+		end
+		return true
+	end
+
 	function M.list()
 		local out = {}
 		for _, id in ipairs(THEME_ORDER) do
 			local p = PALETTES[id]
 			if p then
 				out[#out + 1] = { id = id, label = p.name, isLight = p.isLight }
+			end
+		end
+		for _, id in ipairs(CUSTOM_ORDER) do
+			local p = PALETTES[id]
+			if p then
+				out[#out + 1] = { id = id, label = p.name, isLight = p.isLight, isCustom = true }
 			end
 		end
 		return out

@@ -14,6 +14,17 @@ return function(_env)
 		return spec
 	end
 
+	function M.unregister(id)
+		if not id or not M.byId[id] then return false end
+		M.byId[id] = nil
+		for i = #M.list, 1, -1 do
+			if M.list[i].id == id then
+				table.remove(M.list, i)
+			end
+		end
+		return true
+	end
+
 	function M.run(id, ...)
 		local cmd = M.byId[id]
 		if not cmd or type(cmd.run) ~= "function" then return false, "unknown command: " .. tostring(id) end

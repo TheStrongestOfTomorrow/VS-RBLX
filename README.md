@@ -1,6 +1,13 @@
 # VS-RBLX — Visual Studio Code for Roblox (100% Luau)
 
-**VS-RBLX** is a full-featured **Visual Studio Code clone** built in **100% client-side Luau** for Roblox Executors and LocalScripts. It brings a multi-tab syntax-highlighted IDE, **local disk persistence** (`writefile` / `readfile`), **GitHub repository sync** (`request` / `http_request`), an integrated terminal, unified Git diffs, IntelliSense, and a draggable, viewport-auto-resized, 8-direction player-resizable workbench directly inside Roblox.
+> [!WARNING]
+> **GitHub Issues on this repository are strictly locked to the 5 Verified VS-RBLX Community Extension Templates (`theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, `toolbar-tool`).**
+> - Blank, free-form, and off-topic issues are **disabled** (`blank_issues_enabled: false`).
+> - Every opened or edited issue is **automatically scanned by GitHub Actions** (`.github/workflows/extension-gatekeeper.yml`) and **re-scanned client-side by the VS-RBLX Malware Scanner** before installation.
+> - Any issue that deviates from the 5 declarative JSON schemas or contains executable code (`loadstring`, `HttpGet`, `request`), webhooks (`discord.com/api/webhooks`, Slack, Telegram), obfuscators, or credential access is **immediately rejected and closed** (`not_planned`).
+> - **Comments on verified open extension issues remain open** so the community can review, discuss, and rate extensions!
+
+**VS-RBLX** is a full-featured **Visual Studio Code clone** built in **100% client-side Luau** for Roblox Executors and LocalScripts. It brings a multi-tab syntax-highlighted IDE, **local disk persistence** (`writefile` / `readfile`), **GitHub repository sync** (`request` / `http_request`), an integrated terminal, unified & 2-pane Git diffs, **LSP-style IntelliSense**, a **Locked 5-Template Community Extension Hub**, **Live Split Preview**, **Acode Mobile Mode**, and a draggable, viewport-auto-resized, 8-direction player-resizable workbench directly inside Roblox.
 
 ---
 
@@ -50,10 +57,14 @@ For Roblox Studio testing (without executor globals), paste the contents of [`di
   - **Search (`Ctrl+Shift+F`)**: Workspace-wide text search & multi-file replace (`Aa` case-sensitive & `[ab]` whole-word toggles).
   - **Source Control · GitHub (`Ctrl+Shift+G`)**: Clone repos, authenticate PATs, switch/create branches (including interactive Status Bar `⎇` branch picker), Stage/Unstage/Discard changes, **2-Pane Side-by-Side & Unified Diff Viewer**, **GitHub Gist Import & Publish**, Commit History, and **Commit & Push** directly to GitHub.
   - **Run & Debug (`Ctrl+Shift+D`)**: Run active Luau buffers (`F5`), stop active tasks, and inspect live Luau Watch Expressions.
-  - **Extensions & Capabilities (`Ctrl+Shift+X`)**: Live Executor Capability Matrix, 8 VS Code Color Themes, and 17 built-in language modes.
+  - **Extensions & Security Hub (`Ctrl+Shift+X`)**:
+    - **Locked 5-Template Community Extension Hub**: Syncs verified declarative extensions directly from GitHub Issues (`theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, `toolbar-tool`) with zero arbitrary code execution.
+    - **Built-in Client Malware & Schema Scanner (`🛡 Scanner`)**: Blocks `loadstring`, webhooks, `HttpGet`/`request`, `getgenv`/`hookfunction`, obfuscators, escaped bytecode, and token access; includes 1-click template manifest & GitHub Issue Form generators.
+    - **Host Capabilities, Themes & Languages**: Live Executor Capability Matrix, VS Code Color Themes (+ installed community Theme Packs), and 17 built-in language modes.
   - **Settings (`Ctrl+,`)**: Category filter pills, dropdown option menus, custom toggle-hotkey capture, `Reset`, and live raw `.vsrblx/settings.json` sync.
-- **Monaco-Grade Multi-Tab & Split Code Editor (`Ctrl+\`)**:
-  - Virtualized **RichText syntax highlighting**, **Rainbow Bracket Pair Colorization**, **Vertical Indent Guides**, **Sticky Scroll** scope header, **Live Git Gutter Diff Bars** (added/modified/deleted), **Inline Error Squiggles & Error Lens**, **Inline Color Swatches + HSV Color Picker**, smart auto-closing pairs & auto-indent, **15-Slot Clipboard Ring (`Ctrl+Shift+V`)**, **Crash-Proof Session & Unsaved Draft Auto-Recovery**, **Minimap**, **Breadcrumbs**, and **IntelliSense**.
+- **Monaco-Grade Multi-Tab & Split Code Editor (`Ctrl+\`) + Deep LSP-Style IntelliSense**:
+  - **Deep LSP-Style IntelliSense (`Ctrl+Space` / `F12` / `Ctrl+Shift+I`)**: Live Roblox API & DataModel child Instance completion (`game`, `workspace`, `GetService("...")`, `Instance.new("...")`, `Enum.*`), local variable type inference, cross-file `require("...")` workspace module symbol indexing, floating **Parameter Signature Help**, **Hover Documentation Cards**, **`F12` Cross-File Go-to-Definition**, and expandable `$0` cursor-stop snippets.
+  - Virtualized **RichText syntax highlighting**, **Rainbow Bracket Pair Colorization**, **Vertical Indent Guides**, **Sticky Scroll** scope header, **Live Git Gutter Diff Bars** (added/modified/deleted), **Inline Error Squiggles & Error Lens**, **Inline Color Swatches + HSV Color Picker**, smart auto-closing pairs & auto-indent, **15-Slot Clipboard Ring (`Ctrl+Shift+V`)**, **Crash-Proof Session & Unsaved Draft Auto-Recovery**, **Minimap**, and **Breadcrumbs**.
 - **Integrated Bottom Panel (`Ctrl+J` / `` Ctrl+` ``)**:
   - **PROBLEMS** (live Luau & JSON diagnostics), **TODOS (`Ctrl+Shift+M`)** (`TODO`/`FIXME`/`BUG`/`HACK`/`NOTE` scanner), **OUTPUT** (live **Roblox `LogService.MessageOut`** stream with channel filters & clickable stack-trace file:line jump), **Multi-Session TERMINAL** (`+` new session, `Up`/`Down` history, `Tab` autocomplete, `ls -l`, `tree`, `cd`, `cat`, `head`, `tail`, `wc`, `cp`, `mv`, `echo >`/`>>`, `grep`, `find`, `git diff/stage/unstage/discard/log/branch/checkout/clone/pull/commit/push`, `gist import/publish`, `rblx services/tree/props/path/decompile`, `bundle`, `run`, `luau`), and **HTTP / GIT** network inspector.
 
@@ -88,6 +99,9 @@ For Roblox Studio testing (without executor globals), paste the contents of [`di
 | `Ctrl+N` / `Ctrl+W` | New Scratch Buffer / Close Active Tab |
 | `Ctrl+F` / `Ctrl+H` | Find / Find & Replace in Active File |
 | `Ctrl+G` | Go to Line (`:`) |
+| `Ctrl+Space` | Trigger LSP Autocomplete / Snippets |
+| `F12` | Go to Definition (Local or Cross-File Module) |
+| `Ctrl+Shift+I` | Show Hover Symbol Documentation |
 | `Shift+Alt+F` | Format Document |
 | `Ctrl+\` | Split Editor Right / Close Split |
 | `Ctrl+B` | Toggle Primary Side Bar |
@@ -128,7 +142,7 @@ VS-RBLX/
 ## Building & Testing Offline
 
 ```bash
-# 1. Static syntax & require-graph check across init.lua + all 80 modules
+# 1. Static syntax & require-graph check across init.lua + all 82 modules
 luajit test/check.lua init.lua src
 
 # 2. Bundle all modules into dist/vsrblx.lua & dist/vsrblx.localscript.lua

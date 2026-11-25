@@ -34,6 +34,7 @@ return function(env)
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local languages = env.require("runtime/languages")
 	local previewEngine = env.require("runtime/preview_engine")
+	local extensionHub = env.require("runtime/extension_hub")
 	local codeStore = env.require("runtime/code_store")
 	local clipboard = env.require("runtime/clipboard")
 	local sessionJournal = env.require("runtime/session_journal")
@@ -896,6 +897,37 @@ return function(env)
 
 			reg("editor.gotoLine", "Go to Line...", "Go", "Ctrl+G", function()
 				palette.open(":")
+			end)
+
+			reg("editor.gotoDefinition", "Go to Definition (Local or Cross-File Module)", "Go", "F12", function()
+				local def = focusedEditor().gotoDefinition()
+				if not def then
+					overlay.toast("No workspace symbol definition found at cursor", "info", 2)
+				end
+				return def
+			end)
+
+			reg("editor.triggerSuggest", "Trigger LSP Suggest / Autocomplete", "Edit", "Ctrl+Space", function()
+				return focusedEditor().triggerSuggest()
+			end)
+
+			reg("editor.showHover", "Show Symbol Hover Documentation", "View", "Ctrl+Shift+I", function()
+				local info = focusedEditor().showHover()
+				if not info then
+					overlay.toast("No hover documentation for symbol at cursor", "info", 1.8)
+				end
+				return info
+			end)
+
+			reg("extensions.syncGitHub", "Sync Community Extensions from GitHub Issues Hub", "Extensions", nil, function()
+				selectViewlet("extensions", false)
+				local list, err = extensionHub.syncFromGitHub()
+				if not list then
+					overlay.toast("Extension Hub sync failed: " .. tostring(err), "bad", 3)
+					return nil, err
+				end
+				overlay.toast(string.format("🛡 Scanned %d GitHub Issue extension(s)", #list), "good", 2.4)
+				return list
 			end)
 
 			reg("editor.format", "Format Document", "Edit", "Shift+Alt+F", function()

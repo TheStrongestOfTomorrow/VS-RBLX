@@ -1,0 +1,103 @@
+name: "🛡 VS-RBLX Community Extension Gatekeeper"
+
+# Runs ONLY when an issue is opened, edited, or reopened.
+# Comments (`issue_comment`) on valid open extension issues are intentionally allowed!
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify-extension-issue:
+    name: "Validate 5-Template Schema & Malware Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository validator
+        uses: actions/checkout@v4
+
+      - name: Run deterministic 5-template & malware scanner
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          GATEKEEPER_OUT: /tmp/gatekeeper-result.json
+        run: node .github/scripts/validate_extension_issue.js
+
+      - name: Enforce Gatekeeper Verdict (Allow Verified or Auto-Close Invalid/Malicious)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const report = JSON.parse(fs.readFileSync("/tmp/gatekeeper-result.json", "utf8"));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.issue.number;
+
+            if (report.ok && report.manifest) {
+              const m = report.manifest;
+              try {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number,
+                  labels: ["community-extension", "verified-template", `template:${m.template}`],
+                });
+              } catch (e) {
+                console.log("Label note:", e.message);
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: [
+                  "### 🛡 VS-RBLX Security Gatekeeper — `VERIFIED CLEAN`",
+                  "",
+                  `- **Extension:** \`${m.name}\` (\`${m.id}\` v\`${m.version}\`)`,
+                  `- **Template:** \`${m.template}\` *(strictly declarative — zero executable code)*`,
+                  "- **Malware & Exfiltration Scan:** Passed (`0` findings)",
+                  "",
+                  "Players can now install this extension in-game via **VS-RBLX → Extensions (`Ctrl+Shift+X`) → ↻ Sync Community Extensions**, and community members are welcome to leave feedback in the comments below!",
+                ].join("\n"),
+              });
+            } else {
+              const bullets = (report.findings || []).map((f) => `- ❌ ${f}`).join("\n");
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: [
+                  "### ⛔ VS-RBLX Security Gatekeeper — Issue Automatically Closed",
+                  "",
+                  "GitHub Issues on **VS-RBLX** are strictly locked to the **5 Verified Declarative Community Extension Templates** (`theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, `toolbar-tool`).",
+                  "",
+                  "**Reasons this issue was rejected and closed:**",
+                  bullets || "- ❌ Did not match the required Community Extension YAML Form.",
+                  "",
+                  "> Tip: Inside VS-RBLX, open **Extensions (`Ctrl+Shift+X`) → 🛡 Scanner**, pick one of the 5 starter templates, verify `🛡 VERIFIED CLEAN`, and click **Copy Issue MD** before submitting.",
+                ].join("\n"),
+              });
+
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number,
+                state: "closed",
+                state_reason: "not_planned",
+              });
+
+              if (report.malicious) {
+                try {
+                  await github.rest.issues.lock({
+                    owner,
+                    repo,
+                    issue_number,
+                    lock_reason: "spam",
+                  });
+                } catch (e) {
+                  console.log("Lock note:", e.message);
+                }
+              }
+            }

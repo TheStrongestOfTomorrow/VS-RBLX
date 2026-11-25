@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "📖 VS-RBLX Documentation & Quick Start"
+    url: "https://github.com/TheStrongestOfTomorrow/VS-RBLX#readme"
+    about: "Read the warning banner, Quick Start loader, and 5 allowed declarative extension templates before opening an issue."

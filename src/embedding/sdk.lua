@@ -4,7 +4,10 @@ return function(env)
 	local config = env.require("runtime/config")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local languages = env.require("runtime/languages")
+	local robloxApiDb = env.require("runtime/roblox_api_db")
+	local intellisense = env.require("runtime/intellisense")
 	local previewEngine = env.require("runtime/preview_engine")
+	local extensionHub = env.require("runtime/extension_hub")
 	local codeStore = env.require("runtime/code_store")
 	local codeDiff = env.require("runtime/code_diff")
 	local todoScanner = env.require("runtime/todo_scanner")
@@ -39,7 +42,10 @@ return function(env)
 			config = config,
 			workspace = workspaceFs,
 			languages = languages,
+			robloxApiDb = robloxApiDb,
+			intellisense = intellisense,
 			previewEngine = previewEngine,
+			extensionHub = extensionHub,
 			responsive = responsive,
 			codeStore = codeStore,
 			editor = codeStore,
@@ -62,6 +68,10 @@ return function(env)
 			readFile = function(path) return workspaceFs.readFile(path) end,
 			openPreview = function() return commands.run("preview.openToSide") end,
 			closePreview = function() return commands.run("preview.close") end,
+			scanExtension = function(payload) return extensionHub.scanSubmission(payload) end,
+			installExtension = function(payload) return extensionHub.install(payload) end,
+			uninstallExtension = function(extId) return extensionHub.uninstall(extId) end,
+			syncExtensions = function(repo) return extensionHub.syncFromGitHub(repo) end,
 			bundleWorkspace = function(outPath) return projectBundler.bundleWorkspace(outPath) end,
 			cloneRepo = function(repo, opts) return githubSync.cloneRepo(repo, opts) end,
 			pullRepo = function() return githubSync.pull() end,

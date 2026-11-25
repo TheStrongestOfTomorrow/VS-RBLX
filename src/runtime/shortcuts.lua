@@ -7,6 +7,7 @@ return function(env)
 
 	local M = {
 		bindings = {},
+		customPresets = {},
 		enabled = true,
 		installed = false,
 		capturingCallback = nil,
@@ -61,7 +62,23 @@ return function(env)
 		M.capturingCallback = callback
 	end
 
-	-- Applies base VS Code bindings + active preset (`vscode`, `sublime`, `touch`) + custom toggle hotkey
+	function M.registerCustomPreset(presetId, bindingsList)
+		if type(presetId) ~= "string" or type(bindingsList) ~= "table" then return false end
+		M.customPresets[presetId] = bindingsList
+		if config.get("keybindings.preset", "vscode") == presetId then
+			M.applyPreset(presetId)
+		end
+		return true
+	end
+
+	function M.unregisterCustomPreset(presetId)
+		M.customPresets[presetId] = nil
+		if config.get("keybindings.preset", "vscode") == presetId then
+			config.set("keybindings.preset", "vscode")
+		end
+	end
+
+	-- Applies base VS Code bindings + active preset (`vscode`, `sublime`, `touch` or custom extension preset) + custom toggle hotkey
 	function M.applyPreset(presetName, toggleKeyName)
 		local preset = tostring(presetName or config.get("keybindings.preset", "vscode") or "vscode")
 		local toggleKey = tostring(toggleKeyName or config.get("keybindings.toggleKey", "RightShift") or "RightShift")
@@ -74,6 +91,9 @@ return function(env)
 
 		-- Universal Workbench & File Shortcuts
 		M.bind({ key = "F11" }, "window.maximize", true)
+		M.bind({ key = "F12" }, "editor.gotoDefinition", true)
+		M.bind({ ctrl = true, key = "Space" }, "editor.triggerSuggest", true)
+		M.bind({ ctrl = true, shift = true, key = "I" }, "editor.showHover", true)
 		M.bind({ ctrl = true, shift = true, key = "Z" }, "workbench.toggleZenMode", true)
 		M.bind({ ctrl = true, shift = true, key = "M" }, "workbench.showTodos", true)
 		M.bind({ ctrl = true, shift = true, key = "P" }, "workbench.commandPalette", true)
@@ -124,6 +144,17 @@ return function(env)
 		elseif preset == "touch" then
 			M.bind({ key = "F8" }, "run.activeFile", true)
 			M.bind({ key = "F4" }, "workbench.toggleWindow", true)
+		elseif M.customPresets[preset] then
+			for _, cb in ipairs(M.customPresets[preset]) do
+				if type(cb) == "table" and type(cb.key) == "string" and type(cb.command) == "string" then
+					M.bind({
+						ctrl = cb.ctrl == true,
+						shift = cb.shift == true,
+						alt = cb.alt == true,
+						key = cb.key,
+					}, cb.command, true)
+				end
+			end
 		end
 	end
 
