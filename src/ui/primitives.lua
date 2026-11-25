@@ -194,6 +194,7 @@ return function(env)
 		sf.ScrollingDirection = props.direction or Enum.ScrollingDirection.Y
 		if props.zIndex then sf.ZIndex = props.zIndex end
 		if props.order then sf.LayoutOrder = props.order end
+		if props.visible ~= nil then sf.Visible = props.visible end
 		return sf
 	end
 

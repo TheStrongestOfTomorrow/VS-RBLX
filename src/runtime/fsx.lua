@@ -222,13 +222,24 @@ return function(env)
 		local out = {}
 		local prefix = (full == "") and "" or (full .. "/")
 
-		local function record(rawEntry, forceDir)
+		local function record(rawEntry, forceDir, fromListfiles)
 			local clean = util.normalisePath(rawEntry)
 			if clean == "" or clean == full then return end
 			local rel = clean
 			if prefix ~= "" then
-				if clean:sub(1, #prefix) ~= prefix then return end
-				rel = clean:sub(#prefix + 1)
+				if clean:sub(1, #prefix) == prefix then
+					rel = clean:sub(#prefix + 1)
+				else
+					local slashPrefix = "/" .. prefix
+					local foundIdx = ("/" .. clean):find(slashPrefix, 1, true)
+					if foundIdx then
+						rel = ("/" .. clean):sub(foundIdx + #slashPrefix)
+					elseif fromListfiles and not clean:find("/", 1, true) then
+						rel = clean
+					else
+						return
+					end
+				end
 			end
 			local head = rel:match("^([^/]+)")
 			if not head or head == "" then return end
@@ -261,7 +272,7 @@ return function(env)
 				if ok and type(list) == "table" then
 					for _, entry in ipairs(list) do
 						local cleanEntry = tostring(entry):gsub("^%./", ""):gsub("^%.\\", "")
-						record(cleanEntry, false)
+						record(cleanEntry, false, true)
 					end
 				end
 			end

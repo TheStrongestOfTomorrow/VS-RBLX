@@ -1,7 +1,8 @@
 -- Comprehensive Offline Test Suite for VS-RBLX (`test/run.lua`)
--- Verifies UI boot, Executor `writefile`/`readfile` disk persistence, Executor HTTP GitHub
+-- Verifies exact `loadstring(game:HttpGet(.../dist/vsrblx.lua))()` boot with ZERO host
+-- loadfile fallback, Executor `writefile`/`readfile` disk persistence, Executor HTTP GitHub
 -- clone/pull/commit/push, Window drag + auto-resize + 8-edge/corner player resize,
--- 17-language RichText syntax lexer, IntelliSense, Diagnostics, and bundled `dist/vsrblx.lua`.
+-- 17-language RichText syntax lexer, and locked-CoreGui PlayerGui fallback.
 
 package.path = "./?.lua;./?/init.lua;test/?.lua;test/mock/?.lua;" .. package.path
 
@@ -34,15 +35,35 @@ local function assertTrue(val, label)
 	end
 end
 
+local fhBundle = assert(io.open("dist/vsrblx.lua", "rb"), "dist/vsrblx.lua missing")
+local bundleSource = fhBundle:read("*a")
+fhBundle:close()
+
+local RAW_URL = "https://raw.githubusercontent.com/TheStrongestOfTomorrow/VS-RBLX/main/dist/vsrblx.lua"
+
 local H = mockEnv.new({ width = 1440, height = 900 })
+H.onHttp(function(_req, url)
+	if url == RAW_URL then
+		return { StatusCode = 200, Body = bundleSource }
+	end
+end)
+
 local api = nil
 
-check("1. Boot full VS-RBLX Workbench UI from init.lua", function()
-	local res, err = H.boot("init.lua")
-	assertTrue(res ~= nil, "Boot succeeded: " .. tostring(err))
+check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loadfile", function()
+	assertEq(H.sandbox.loadfile, nil, "No host loadfile exposed in executor sandbox")
+	local loaderChunk = assert(H.sandbox.loadstring(
+		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',
+		"@executor"
+	))
+	local ok, res = pcall(loaderChunk)
+	assertTrue(ok and type(res) == "table", "Executor loadstring booted cleanly: " .. tostring(res))
 	api = res
+
 	assertEq(api.version, "1.0.0", "SDK version")
-	assertTrue(H.sandbox.VSRBLX == api, "Registered on getgenv().VSRBLX")
+	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
+	assertTrue(api._env.moduleTotal == 69, "All 69 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
 
 	local gui = H.screen()
 	assertTrue(gui ~= nil and gui.Name == "VSRBLX_Workbench", "ScreenGui mounted inside gethui()")
@@ -156,7 +177,7 @@ check("4. Window Dragging, Viewport Auto-Resize, & 8-Direction Player Resizing",
 	local initX = winRoot.Position.X.Offset
 	local initY = winRoot.Position.Y.Offset
 
-	-- (A) TitleBar Dragging by Player (avoiding center pill & right buttons)
+	-- (A) TitleBar Dragging by Player
 	H.drag(titleBar, 380, initY + 14, 440, initY + 49)
 	assertEq(winRoot.Position.X.Offset, initX + 60, "Window dragged +60px horizontally")
 	assertEq(winRoot.Position.Y.Offset, initY + 35, "Window dragged +35px vertically")
@@ -241,24 +262,34 @@ check("5. 17-Language Syntax Lexer, IntelliSense, Diagnostics, Search, Formatter
 	api.setTheme("dark_plus")
 end)
 
-check("6. Single-file Bundled LocalScript (dist/vsrblx.lua) & Studio Fallback Boot", function()
+check("6. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+	-- Re-running the same build toggles visibility and returns existing handle
+	local secondChunk = assert(H.sandbox.loadstring(
+		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',
+		"@executor2"
+	))
+	local secondRes = secondChunk()
+	assertTrue(secondRes == api, "Re-running identical build reused active VSRBLX instance")
+	assertTrue(api.app.window.minimised == true, "Second run toggled window to minimised pill")
+	secondChunk()
+	assertTrue(api.app.window.minimised == false, "Third run restored window from minimised pill")
 	api.destroy()
 
-	local H2 = mockEnv.new({ width = 1280, height = 720 })
-	local bundleApi, bErr = H2.boot("dist/vsrblx.lua")
-	assertTrue(bundleApi ~= nil, "Bundled dist/vsrblx.lua booted: " .. tostring(bErr))
-	assertEq(bundleApi.version, "1.0.0", "Bundled version matches")
-	assertTrue(bundleApi.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID stamped")
-	assertTrue(H2.screen() ~= nil, "Bundled script mounted VSRBLX_Workbench UI")
-	bundleApi.destroy()
-
-	local H3 = mockEnv.new({ width = 1280, height = 720, executor = false })
-	local studioApi, sErr = H3.boot("dist/vsrblx.localscript.lua")
-	assertTrue(studioApi ~= nil, "LocalScript bundle booted cleanly without executor globals: " .. tostring(sErr))
+	-- Locked CoreGui + No Executor Globals -> must fall back cleanly to PlayerGui!
+	local HStudio = mockEnv.new({ width = 1280, height = 720, executor = false, lockCoreGui = true })
+	local studioApi, sErr = HStudio.boot("dist/vsrblx.localscript.lua")
+	assertTrue(studioApi ~= nil, "LocalScript bundle survived locked CoreGui and mounted in PlayerGui: " .. tostring(sErr))
+	assertTrue(HStudio.playerGui:FindFirstChild("VSRBLX_Workbench") ~= nil, "Mounted inside PlayerGui")
 	assertTrue(studioApi.fs.isBackedByDisk() == false, "Fell back gracefully to virtual memory FS")
 	assertTrue(studioApi.writeFile("test.luau", "return 123"), "Virtual memory FS write succeeded")
 	assertEq(studioApi.readFile("test.luau"), "return 123", "Virtual memory FS read succeeded")
 	studioApi.destroy()
+
+	-- Unbundled dev mode (`init.lua`) when allowHostLoadfile = true
+	local HDev = mockEnv.new({ width = 1280, height = 720, allowHostLoadfile = true })
+	local devApi, dErr = HDev.boot("init.lua")
+	assertTrue(devApi ~= nil, "Unbundled init.lua dev loader works: " .. tostring(dErr))
+	devApi.destroy()
 end)
 
 io.write(string.format("\nTest Summary: %d passed, %d failed\n", passed, failed))
