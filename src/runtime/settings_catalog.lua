@@ -168,18 +168,55 @@ return function(_env)
 			description = "Automatically writes cloned/pulled GitHub files to local executor disk.",
 			kind = "boolean",
 		},
+		{
+			key = "git.sideBySideDiff",
+			category = "GitHub",
+			title = "Side-by-Side Diff View",
+			description = "Opens Source Control diffs in 2-pane Side-by-Side mode instead of Unified mode.",
+			kind = "boolean",
+		},
+		{
+			key = "git.gutterDecorations",
+			category = "GitHub",
+			title = "Git Gutter Diff Indicators",
+			description = "Renders live green/blue/red Git change bars in the editor gutter against HEAD.",
+			kind = "boolean",
+		},
+		{
+			key = "roblox.captureLogService",
+			category = "Roblox",
+			title = "Capture Live LogService Stream",
+			description = "Streams Roblox print(), warn(), and error() output into the OUTPUT console with stack-jump.",
+			kind = "boolean",
+		},
 	}
 
-	function M.search(query)
+	function M.categories()
+		local seen = {}
+		local out = { "All" }
+		for _, item in ipairs(M.items) do
+			if item.category and not seen[item.category] then
+				seen[item.category] = true
+				out[#out + 1] = item.category
+			end
+		end
+		return out
+	end
+
+	function M.search(query, category)
 		local q = tostring(query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-		if q == "" then return M.items end
+		local cat = (category and category ~= "" and category ~= "All") and category or nil
 		local out = {}
 		for _, item in ipairs(M.items) do
-			if item.key:lower():find(q, 1, true)
-				or item.title:lower():find(q, 1, true)
-				or item.description:lower():find(q, 1, true)
-				or item.category:lower():find(q, 1, true) then
-				out[#out + 1] = item
+			local catOk = (not cat) or (item.category == cat)
+			if catOk then
+				if q == ""
+					or item.key:lower():find(q, 1, true)
+					or item.title:lower():find(q, 1, true)
+					or item.description:lower():find(q, 1, true)
+					or item.category:lower():find(q, 1, true) then
+					out[#out + 1] = item
+				end
 			end
 		end
 		return out

@@ -116,5 +116,93 @@ return function(env)
 		}
 	end
 
+	-- Pairs contiguous remove+add blocks into 2-column Side-by-Side rows
+	function M.sideBySide(oldSource, newSource)
+		local unified = M.compute(oldSource, newSource)
+		local rows = unified.rows
+		local out = {}
+		local idx = 1
+		local total = #rows
+
+		while idx <= total do
+			local r = rows[idx]
+			if r.kind == "context" then
+				out[#out + 1] = {
+					leftLine = r.oldLine,
+					leftText = r.text,
+					leftKind = "context",
+					rightLine = r.newLine,
+					rightText = r.text,
+					rightKind = "context",
+				}
+				idx = idx + 1
+			else
+				local remBlock, addBlock = {}, {}
+				while idx <= total and rows[idx].kind == "remove" do
+					remBlock[#remBlock + 1] = rows[idx]
+					idx = idx + 1
+				end
+				while idx <= total and rows[idx].kind == "add" do
+					addBlock[#addBlock + 1] = rows[idx]
+					idx = idx + 1
+				end
+				local span = math.max(#remBlock, #addBlock)
+				for k = 1, span do
+					local rem = remBlock[k]
+					local add = addBlock[k]
+					out[#out + 1] = {
+						leftLine = rem and rem.oldLine or nil,
+						leftText = rem and rem.text or "",
+						leftKind = rem and "remove" or "empty",
+						rightLine = add and add.newLine or nil,
+						rightText = add and add.text or "",
+						rightKind = add and "add" or "empty",
+					}
+				end
+			end
+		end
+
+		return {
+			rows = out,
+			added = unified.added,
+			removed = unified.removed,
+		}
+	end
+
+	-- Returns `{ [newLineNumber] = "add" | "modify" | "delete" }` for Editor Gutter Git indicators
+	function M.lineMarkers(oldSource, newSource)
+		if oldSource == newSource then return {} end
+		local unified = M.compute(oldSource or "", newSource or "")
+		local markers = {}
+		local pendingRemove = false
+		local lastNewLine = 1
+
+		for _, r in ipairs(unified.rows) do
+			if r.kind == "remove" then
+				pendingRemove = true
+			elseif r.kind == "add" then
+				local ln = r.newLine or lastNewLine
+				markers[ln] = pendingRemove and "modify" or "add"
+				lastNewLine = ln
+			else
+				if pendingRemove then
+					local anchor = r.newLine or lastNewLine
+					if not markers[anchor] then
+						markers[anchor] = "delete"
+					end
+					pendingRemove = false
+				end
+				if r.newLine then
+					lastNewLine = r.newLine
+				end
+			end
+		end
+
+		if pendingRemove and not markers[lastNewLine] then
+			markers[lastNewLine] = "delete"
+		end
+		return markers
+	end
+
 	return M
 end

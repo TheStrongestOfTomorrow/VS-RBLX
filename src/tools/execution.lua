@@ -29,6 +29,10 @@ return function(env)
 		return runner.execute(doc.content, doc.path ~= "" and doc.path or doc.title)
 	end
 
+	function M.runSource(source, label)
+		return runner.execute(source, label or "terminal-repl")
+	end
+
 	function M.stop()
 		return runner.stopAll()
 	end

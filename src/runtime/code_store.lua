@@ -196,6 +196,8 @@ return function(env)
 		return doc
 	end
 
+	M.openDiff = M.openDiffTab
+
 	function M.openVirtualTab(id, title, content, langId, readOnly)
 		local fullId = "virtual:" .. tostring(id)
 		local doc = M.byId[fullId]
@@ -465,6 +467,8 @@ return function(env)
 		M.changed:fire({ reason = "rename", oldId = oldId, id = newId, path = cleanNew })
 		return true
 	end
+
+	M.renameOpenPath = M.renameOpenFile
 
 	function M.closeOthers(keepId)
 		for i = #M.tabs, 1, -1 do

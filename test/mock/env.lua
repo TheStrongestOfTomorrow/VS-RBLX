@@ -274,6 +274,19 @@ function M.new(opts)
 	sampleScript.Name = "GameController"
 	sampleScript.Source = "-- In-game LocalScript\nprint('Hello from Workspace!')\n"
 
+	local spawnFolder = createInstance("Folder", workspaceInst)
+	spawnFolder.Name = "ArenaMap"
+	local killBrick = createInstance("Part", spawnFolder)
+	killBrick.Name = "Lava Platform"
+	killBrick.Position = dt.Vector3.new(12, 4, -8)
+
+	local mockMouse = { Target = killBrick }
+	rawset(localPlayer, "GetMouse", function() return mockMouse end)
+
+	local logService = {
+		MessageOut = makeSignal(),
+	}
+
 	local replicatedStorage = createInstance("ReplicatedStorage")
 	local sharedMod = createInstance("ModuleScript", replicatedStorage)
 	sharedMod.Name = "SharedConfig"
@@ -318,6 +331,7 @@ function M.new(opts)
 		CoreGui = coreGui,
 		Workspace = workspaceInst,
 		ReplicatedStorage = replicatedStorage,
+		LogService = logService,
 		UserInputService = uis,
 		Players = {
 			LocalPlayer = localPlayer,
@@ -566,6 +580,9 @@ function M.new(opts)
 		coreGui = coreGui,
 		playerGui = playerGui,
 		camera = camera,
+		logService = logService,
+		mouse = mockMouse,
+		killBrick = killBrick,
 		uis = uis,
 		heldKeys = heldKeys,
 		Enum = Enum,

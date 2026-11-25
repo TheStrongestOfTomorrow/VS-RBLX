@@ -76,6 +76,8 @@ return function(env)
 		return clean
 	end
 
+	M.normalizePath = M.normalisePath
+
 	function M.basename(path)
 		local clean = M.normalisePath(path)
 		if clean == "" then return "" end
@@ -154,6 +156,8 @@ return function(env)
 		if #out == 0 then out[1] = "" end
 		return out
 	end
+
+	M.splitLines = M.lines
 
 	function M.formatBytes(bytes)
 		local n = tonumber(bytes) or 0

@@ -62,7 +62,7 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 74, "All 74 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 77, "All 77 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
 
 	local gui = H.screen()
@@ -452,7 +452,144 @@ check("7. Combined Phase 2+3: Monaco Smart Typing, Color Picker, Clipboard 15-Ri
 	assertTrue(recoveredDoc.content:find("UNSAVED_CRASH_DRAFT_MARKER_999", 1, true) ~= nil, "Exact unsaved draft content recovered after reboot!")
 end)
 
-check("8. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+check("8. Combined Sprint 3: Multi-Session Terminal, Roblox LogService & Eyedropper, Bundler, Side-by-Side Diff, Gist & Settings Sync", function()
+	-- (A) Multi-Session Terminal + UNIX CLI + History + Tab Autocomplete
+	local sess1 = api.terminal.activeSession()
+	local okTerm, sess2 = api.runCommand("terminal.newSession")
+	assertTrue(okTerm and sess2 ~= nil and sess2.id ~= sess1.id, "Created second terminal session")
+	assertEq(#api.terminal.sessions, 2, "Two concurrent terminal sessions active")
+
+	api.terminal.execute('echo "return { answer = 42 }" > src/helper_mod.luau')
+	assertTrue(api.readFile("src/helper_mod.luau"):find("answer = 42", 1, true) ~= nil, "Terminal echo > redirection wrote src/helper_mod.luau")
+	api.terminal.execute("cp src/helper_mod.luau src/helper_copy.luau")
+	assertTrue(api.workspace.exists("src/helper_copy.luau"), "Terminal cp copied file on disk")
+	api.terminal.execute("mv src/helper_copy.luau src/helper_renamed.luau")
+	assertTrue(api.workspace.exists("src/helper_renamed.luau") and not api.workspace.exists("src/helper_copy.luau"), "Terminal mv renamed file on disk")
+	api.terminal.execute("tree src")
+	api.terminal.execute("ls -l src")
+	api.terminal.execute("wc src/helper_mod.luau")
+	api.terminal.execute("grep answer")
+
+	assertEq(api.terminal.historyPrev(), "grep answer", "Terminal Up-arrow history recalled last command")
+	assertEq(api.terminal.historyPrev(), "wc src/helper_mod.luau", "Terminal Up-arrow history walked backward")
+	assertEq(api.terminal.historyNext(), "grep answer", "Terminal Down-arrow history walked forward")
+
+	local compCmd = api.terminal.autocomplete("bun")
+	assertEq(compCmd, "bundle", "Tab autocomplete expanded `bun` -> `bundle`")
+	local compGitPrefix = api.terminal.autocomplete("git st")
+	assertEq(compGitPrefix, "git sta", "Tab autocomplete expanded common prefix `git st` -> `git sta` (stage/status)")
+	local compGit = api.terminal.autocomplete("git stag")
+	assertEq(compGit, "git stage", "Tab autocomplete expanded `git stag` -> `git stage`")
+	local compPath = api.terminal.autocomplete("cat src/helper_r")
+	assertEq(compPath, "cat src/helper_renamed.luau", "Tab autocomplete expanded workspace file path")
+
+	assertTrue(api.terminal.closeSession(sess2.id) == true, "Closed second terminal session")
+	assertEq(api.terminal.activeSessionId, sess1.id, "Returned to primary terminal session")
+
+	-- (B) Live Roblox LogService Stream + Clickable Stack-Trace Jump
+	api.writeFile("src/stack_target.luau", "local a = 1\nlocal b = 2\nerror('boom')\n")
+	H.logService.MessageOut:Fire("[string \"src/stack_target.luau\"]:3: attempt to index nil", H.Enum.MessageType.MessageError)
+	local rblxLogs = api._env.require("runtime/log").list("roblox")
+	assertTrue(#rblxLogs >= 1, "LogService.MessageOut streamed error into roblox output channel")
+	local jumped = api.robloxConsole.jumpToLogEntry(rblxLogs[#rblxLogs])
+	assertTrue(jumped == true, "Clicked stack trace jumped to matching workspace file")
+	assertEq(api.codeStore.active().path, "src/stack_target.luau", "Opened stack trace target file")
+	assertEq(api.codeStore.active().view.line, 3, "Jumped directly to error line 3")
+
+	-- (C) Roblox DataModel Luau Path Generator, CLI & 3D Eyedropper Instance Picker
+	local brickPath = api.robloxExplorer.luauPathOf(H.killBrick)
+	assertEq(brickPath, 'workspace.ArenaMap["Lava Platform"]', "Generated bracket-escaped Luau path for 3D Part")
+	local resolvedInst = api.robloxExplorer.resolvePath('workspace.ArenaMap["Lava Platform"]')
+	assertTrue(resolvedInst == H.killBrick, "robloxExplorer.resolvePath resolved bracketed path back to Part")
+	local props = api.robloxExplorer.inspectProperties(H.killBrick)
+	assertTrue(#props >= 3, "robloxExplorer.inspectProperties extracted Instance properties")
+
+	local scratchDoc = api.openFile("src/eyetest.luau") or api.codeStore.newUntitled("", "luau")
+	api.writeFile("src/eyetest.luau", "local part = ")
+	scratchDoc = api.openFile("src/eyetest.luau", { reloadFromDisk = true })
+	api.app.primaryEditor.box.CursorPosition = #scratchDoc.content + 1
+	api.app.primaryEditor.box.SelectionStart = -1
+
+	api.runCommand("roblox.pickInstance")
+	assertTrue(api.instancePicker.active == true, "Eyedropper mode activated and temporarily hid main window")
+	-- Simulate clicking in 3D viewport where mouse.Target == H.killBrick
+	H.uis.InputBegan:Fire({
+		UserInputType = H.Enum.UserInputType.MouseButton1,
+		Position = H.dt.Vector3.new(500, 400, 0),
+	})
+	assertTrue(api.instancePicker.active == false, "Eyedropper completed on 3D click and restored window")
+	assertEq(scratchDoc.content, 'local part = workspace.ArenaMap["Lava Platform"]', "Eyedropper inserted exact Luau path at cursor!")
+
+	-- (D) 1-Click Standalone Multi-File Workspace Bundler & Execution Verification
+	api.writeFile("src/main.luau", 'local h = require("src/helper_mod")\nreturn h.answer * 2\n')
+	local okBundle, bundleRes = api.runCommand("workspace.bundle")
+	assertTrue(okBundle and bundleRes ~= nil, "Bundled multi-file workspace")
+	assertTrue(H.sandbox.isfile(api.workspace.diskPath(bundleRes.outputPath)), "Standalone bundle written to dist/")
+	local bundledChunk = assert(H.sandbox.loadstring(bundleRes.content, "@bundled_project"))
+	assertEq(bundledChunk(), 84, "Generated standalone bundle executed `require('src/helper_mod')` and returned 84!")
+
+	-- (E) 2-Pane Side-by-Side Diff + Live Gutter Diff Bars + GitHub Gist Import/Publish
+	api.git.recordSnapshot("TheStrongestOfTomorrow/DemoRepo", "main", "abc1234", {
+		["src/main.luau"] = 'local h = require("src/helper_mod")\nreturn h.answer\n',
+	})
+	local mainDoc = api.openFile("src/main.luau", { reloadFromDisk = true })
+	api.codeStore.updateContent(mainDoc.id, 'local h = require("src/helper_mod")\nlocal bonus = 10\nreturn h.answer + bonus\n')
+	local markers = api.codeDiff.lineMarkers(api.git.originalContent("src/main.luau"), mainDoc.content)
+	assertTrue(markers[2] ~= nil or markers[3] ~= nil, "Computed live Git gutter diff markers against HEAD")
+	assertTrue(H.byName("GitDiffBar_2") ~= nil, "Editor gutter created GitDiffBar widgets")
+
+	local diffDoc = api.codeStore.openDiff("src/main.luau", api.git.originalContent("src/main.luau"), mainDoc.content)
+	assertTrue(diffDoc.isDiff == true, "Opened diff tab via codeStore.openDiff")
+	assertTrue(H.byName("DiffSideBySideWrap").Visible == true, "2-Pane Side-by-Side Diff Viewer visible by default")
+	H.click(H.byName("ToggleDiffModeBtn"))
+	assertTrue(H.byName("DiffUnifiedScroll").Visible == true, "Toggled Diff Viewer to Unified mode")
+	H.click(H.byName("ToggleDiffModeBtn"))
+	assertTrue(H.byName("DiffSideBySideWrap").Visible == true, "Toggled Diff Viewer back to Side-by-Side mode")
+
+	-- Mock GitHub Gist API for Import + Publish
+	api.config.set("github.token", "ghp_test_token_123", { immediate = true })
+	H.onHttp(function(req, url, method)
+		if url == "https://api.github.com/gists/a1b2c3d4e5f60001" and method == "GET" then
+			return {
+				StatusCode = 200,
+				Body = {
+					files = {
+						["utility_snippet.luau"] = { content = "return 'from_gist'\n" },
+					},
+				},
+			}
+		elseif url == "https://api.github.com/gists" and method == "POST" then
+			local payload = json.decode(req.Body)
+			assertTrue(type(payload.files) == "table", "Gist POST body includes files map")
+			return {
+				StatusCode = 201,
+				Body = {
+					id = "f00dbabe12345678",
+					html_url = "https://gist.github.com/f00dbabe12345678",
+				},
+			}
+		end
+	end)
+	local importedGist, igErr = api.importGist("a1b2c3d4e5f60001")
+	assertTrue(importedGist ~= nil and importedGist.count == 1, "Imported GitHub Gist to local disk: " .. tostring(igErr))
+	assertEq(api.readFile("gists/utility_snippet.luau"), "return 'from_gist'\n", "Gist content persisted to disk")
+
+	api.openFile("gists/utility_snippet.luau")
+	local pubGist, pgErr = api.publishGist({ public = false })
+	assertTrue(pubGist ~= nil and pubGist.url == "https://gist.github.com/f00dbabe12345678", "Published Gist via POST /gists: " .. tostring(pgErr))
+	assertEq(H.sandbox.__clipboard, "https://gist.github.com/f00dbabe12345678", "Published Gist URL copied to clipboard")
+
+	-- (F) Upgraded Settings UI + Live Raw `settings.json` Sync
+	local okSettings, settingsDoc = api.runCommand("preferences.openSettingsJson")
+	assertTrue(okSettings and settingsDoc ~= nil and settingsDoc.path == ".vsrblx/settings.json", "Opened raw .vsrblx/settings.json")
+	local parsedCfg = json.decode(settingsDoc.content)
+	parsedCfg.editor.tabSize = 2
+	api.codeStore.updateContent(settingsDoc.id, json.encode(parsedCfg))
+	api.runCommand("file.save")
+	assertEq(api.config.get("editor.tabSize"), 2, "Saving .vsrblx/settings.json live-synced config.editor.tabSize = 2!")
+end)
+
+check("9. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
 	-- Re-running the same build toggles visibility and returns existing handle
 	local secondChunk = assert(H.sandbox.loadstring(
 		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',
