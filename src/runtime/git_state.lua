@@ -144,6 +144,7 @@ return function(env)
 					path = path,
 					name = util.basename(path),
 					kind = kind,
+					status = kind,
 					oldContent = base or "",
 					newContent = cur or "",
 					sha = M.fileShas[path],
@@ -247,6 +248,21 @@ return function(env)
 
 	function M.baselineOf(path)
 		return M.baseFiles[util.normalisePath(path)] or ""
+	end
+
+	function M.originalContent(path)
+		return M.baseFiles[util.normalisePath(path)]
+	end
+
+	M.discardFile = M.discard
+
+	function M.recordSnapshot(repo, branch, headSha, filesMap)
+		return M.adoptRemoteSnapshot({
+			repo = repo,
+			branch = branch,
+			headSha = headSha,
+			files = filesMap or {},
+		})
 	end
 
 	function M.commitLocal(message)

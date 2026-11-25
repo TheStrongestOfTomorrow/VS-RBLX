@@ -40,18 +40,18 @@ For Roblox Studio testing (without executor globals), paste the contents of [`di
 ## Core Features
 
 ### Authentic VS Code Workbench
-- **Title Bar**: VS-RBLX emblem, top dropdown menus (`File`, `Edit`, `View`, `Run`, `GitHub`), centered Command Center search pill (`Ctrl+P`), layout toggles, and Minimize / Maximize / Close controls.
+- **Title Bar**: VS-RBLX emblem, top dropdown menus (`File`, `Edit`, `View`, `Run`, `GitHub`), centered Command Center search pill (`Ctrl+P`), **Ghost-Coding Opacity Slider (`30%–100%`)**, **Zen Mode (`Ctrl+Shift+Z`)**, layout toggles, and Minimize / Maximize / Close controls.
 - **Activity Bar & Side Bar Viewlets**:
-  - **Explorer (`Ctrl+Shift+E`)**: Open Editors, Local Disk File Tree (`writefile`/`readfile`/`makefolder`/`delfile`), and live **Roblox DataModel Explorer** (`Workspace`, `ReplicatedStorage`, `Players`, etc.) to inspect or import in-game `LocalScript`/`ModuleScript` sources onto disk.
+  - **Explorer (`Ctrl+Shift+E`)**: Open Editors, inline file/folder creation & `F2` rename on Local Disk (`writefile`/`readfile`/`makefolder`/`delfile`), **1-Click Standalone Project Bundler (`📦` / `Ctrl+Shift+B`)**, and live **Roblox DataModel Explorer** with **3D/GUI Eyedropper Path Picker (`🎯`)**, Copy Luau Path, Property Inspector, and `decompile()` to disk.
   - **Search (`Ctrl+Shift+F`)**: Workspace-wide text search & multi-file replace (`Aa` case-sensitive & `[ab]` whole-word toggles).
-  - **Source Control · GitHub (`Ctrl+Shift+G`)**: Clone repos, authenticate PATs, browse your GitHub repos, switch/create branches, stage/unstage/discard changes, inspect colorized **Unified Diffs**, and **Commit & Push** directly to GitHub.
+  - **Source Control · GitHub (`Ctrl+Shift+G`)**: Clone repos, authenticate PATs, switch/create branches (including interactive Status Bar `⎇` branch picker), Stage/Unstage/Discard changes, **2-Pane Side-by-Side & Unified Diff Viewer**, **GitHub Gist Import & Publish**, Commit History, and **Commit & Push** directly to GitHub.
   - **Run & Debug (`Ctrl+Shift+D`)**: Run active Luau buffers (`F5`), stop active tasks, and inspect live Luau Watch Expressions.
   - **Extensions & Capabilities (`Ctrl+Shift+X`)**: Live Executor Capability Matrix, 8 VS Code Color Themes, and 17 built-in language modes.
-  - **Settings (`Ctrl+,`)**: Interactive settings editor persisted to `VSRBLX/settings.json`.
-- **Multi-Tab & Split Code Editor (`Ctrl+\`)**:
-  - Virtualized **RichText syntax highlighting**, Gutter line numbers, active-line highlight, error/warning gutter markers, **Minimap**, **Breadcrumbs** with symbol jump (`ƒ`), inline **Find & Replace (`Ctrl+F` / `Ctrl+H`)**, and **IntelliSense** completions.
+  - **Settings (`Ctrl+,`)**: Category filter pills, dropdown option menus, custom toggle-hotkey capture, `Reset`, and live raw `.vsrblx/settings.json` sync.
+- **Monaco-Grade Multi-Tab & Split Code Editor (`Ctrl+\`)**:
+  - Virtualized **RichText syntax highlighting**, **Rainbow Bracket Pair Colorization**, **Vertical Indent Guides**, **Sticky Scroll** scope header, **Live Git Gutter Diff Bars** (added/modified/deleted), **Inline Error Squiggles & Error Lens**, **Inline Color Swatches + HSV Color Picker**, smart auto-closing pairs & auto-indent, **15-Slot Clipboard Ring (`Ctrl+Shift+V`)**, **Crash-Proof Session & Unsaved Draft Auto-Recovery**, **Minimap**, **Breadcrumbs**, and **IntelliSense**.
 - **Integrated Bottom Panel (`Ctrl+J` / `` Ctrl+` ``)**:
-  - **PROBLEMS** (live Luau & JSON diagnostics), **OUTPUT** (`print`/`warn` streams), **TERMINAL** (`ls`, `cd`, `cat`, `touch`, `mkdir`, `rm`, `run`, `luau`, `git status`, `git clone`, `git pull`, `git push`, `gh auth`, `http get`), and **HTTP / GIT** network inspector.
+  - **PROBLEMS** (live Luau & JSON diagnostics), **TODOS (`Ctrl+Shift+M`)** (`TODO`/`FIXME`/`BUG`/`HACK`/`NOTE` scanner), **OUTPUT** (live **Roblox `LogService.MessageOut`** stream with channel filters & clickable stack-trace file:line jump), **Multi-Session TERMINAL** (`+` new session, `Up`/`Down` history, `Tab` autocomplete, `ls -l`, `tree`, `cd`, `cat`, `head`, `tail`, `wc`, `cp`, `mv`, `echo >`/`>>`, `grep`, `find`, `git diff/stage/unstage/discard/log/branch/checkout/clone/pull/commit/push`, `gist import/publish`, `rblx services/tree/props/path/decompile`, `bundle`, `run`, `luau`), and **HTTP / GIT** network inspector.
 
 ### Draggable, Auto-Resized & Player-Resizable Window
 - **Draggable**: Drag anywhere on the Title Bar; double-click the Title Bar to Maximize/Restore; drag to the top/left/right screen edges for **Aero-Snap** (full-screen or 50% split).
@@ -124,7 +124,7 @@ VS-RBLX/
 ## Building & Testing Offline
 
 ```bash
-# 1. Static syntax & require-graph check across all 69 modules
+# 1. Static syntax & require-graph check across init.lua + all 77 modules
 luajit test/check.lua init.lua src
 
 # 2. Bundle all modules into dist/vsrblx.lua & dist/vsrblx.localscript.lua

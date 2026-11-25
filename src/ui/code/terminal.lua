@@ -1,11 +1,17 @@
--- VS Code Bottom Integrated Panel with PROBLEMS, TODOS, OUTPUT, TERMINAL, and HTTP/GIT tabs.
+-- VS Code Bottom Integrated Panel:
+-- PROBLEMS, TODOS, OUTPUT (with Live Roblox LogService channel filters & clickable stack-jump),
+-- Multi-Session TERMINAL (`+` new shell, `✕` close, `Up`/`Down` history, `Tab` autocomplete),
+-- and HTTP / GIT traffic inspector.
 return function(env)
 	local P = env.require("ui/primitives")
 	local theme = env.require("ui/theme")
 	local config = env.require("runtime/config")
+	local dispose = env.require("runtime/dispose")
 	local log = env.require("runtime/log")
+	local robloxConsole = env.require("runtime/roblox_console")
 	local diagnostics = env.require("runtime/diagnostics")
 	local todoScanner = env.require("runtime/todo_scanner")
+	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
 	local http = env.require("net/http")
 	local terminalCmds = env.require("tools/terminal_cmds")
@@ -43,11 +49,11 @@ return function(env)
 		})
 
 		local tabRow = P.frame(header, {
-			size = UDim2.new(1, -90, 1, 0),
+			size = UDim2.new(1, -116, 1, 0),
 			pos = UDim2.fromOffset(10, 0),
 			zIndex = 22,
 		})
-		P.list(tabRow, Enum.FillDirection.Horizontal, 10, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+		P.list(tabRow, Enum.FillDirection.Horizontal, 8, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 
 		local tabButtons = {}
 		local activeTab = config.get("workbench.activePanelTab", "terminal")
@@ -60,13 +66,27 @@ return function(env)
 		})
 		bodyArea.BackgroundTransparency = 1
 
-		-- Clear & Close panel buttons
 		local rightBtns = P.frame(header, {
-			size = UDim2.fromOffset(72, 28),
-			pos = UDim2.new(1, -76, 0, 0),
+			size = UDim2.fromOffset(102, 28),
+			pos = UDim2.new(1, -106, 0, 0),
 			zIndex = 22,
 		})
 		P.list(rightBtns, Enum.FillDirection.Horizontal, 4, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
+
+		local newTermBtn = P.button(rightBtns, {
+			name = "NewTerminalSessionBtn",
+			size = UDim2.fromOffset(24, 22),
+			text = "+",
+			bold = true,
+			textSize = 13,
+			color = theme.color.tabActiveText,
+			radius = 3,
+			order = 1,
+			zIndex = 23,
+			onClick = function()
+				terminalCmds.newSession()
+			end,
+		})
 
 		P.button(rightBtns, {
 			name = "ClearPanelBtn",
@@ -75,7 +95,7 @@ return function(env)
 			textSize = 11,
 			color = theme.color.muted,
 			radius = 3,
-			order = 1,
+			order = 2,
 			zIndex = 23,
 			onClick = function()
 				if activeTab == "terminal" then terminalCmds.clear()
@@ -90,7 +110,7 @@ return function(env)
 			textSize = 11,
 			color = theme.color.muted,
 			radius = 3,
-			order = 2,
+			order = 3,
 			zIndex = 23,
 			onClick = function()
 				if onClosePanel then onClosePanel() end
@@ -102,7 +122,7 @@ return function(env)
 		P.pad(problemsScroll, 6, 8, 6, 8)
 		P.list(problemsScroll, Enum.FillDirection.Vertical, 2)
 
-		-- 2. TODOS view (with filter chips + 1-click line jump)
+		-- 2. TODOS view
 		local todosPane = P.frame(bodyArea, { name = "TodosView", size = UDim2.fromScale(1, 1), visible = false, zIndex = 22 })
 		local todoFilterRow = P.frame(todosPane, {
 			name = "TodoFilterBar",
@@ -158,16 +178,76 @@ return function(env)
 			filterBtns[chip.id] = fb
 		end
 
-		-- 3. OUTPUT view
-		local outputScroll = P.scroll(bodyArea, { name = "OutputView", visible = false, zIndex = 22 })
-		P.pad(outputScroll, 6, 8, 6, 8)
+		-- 3. OUTPUT view (with Channel Filter Pills + Clickable Stack-Trace Jump!)
+		local outputPane = P.frame(bodyArea, { name = "OutputView", size = UDim2.fromScale(1, 1), visible = false, zIndex = 22 })
+		local outFilterRow = P.frame(outputPane, {
+			name = "OutputFilterBar",
+			size = UDim2.new(1, 0, 0, 24),
+			pos = UDim2.fromOffset(8, 3),
+			zIndex = 23,
+		})
+		P.list(outFilterRow, Enum.FillDirection.Horizontal, 6, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+
+		local outputScroll = P.scroll(outputPane, {
+			name = "OutputScroll",
+			size = UDim2.new(1, 0, 1, -28),
+			pos = UDim2.fromOffset(0, 28),
+			zIndex = 23,
+		})
+		P.pad(outputScroll, 4, 8, 6, 8)
 		P.list(outputScroll, Enum.FillDirection.Vertical, 1)
 
-		-- 4. TERMINAL view
+		local activeOutChannel = "all"
+		local renderOutput
+		local OUT_CHANNELS = {
+			{ id = "all", label = "All" },
+			{ id = "roblox", label = "Roblox LogService" },
+			{ id = "execution", label = "Execution" },
+			{ id = "github", label = "GitHub / FS" },
+		}
+		local outChannelBtns = {}
+		for idx, chSpec in ipairs(OUT_CHANNELS) do
+			local cb = P.button(outFilterRow, {
+				name = "OutFilter_" .. chSpec.id,
+				size = UDim2.fromOffset(#chSpec.label * 6 + 18, 20),
+				bg = chSpec.id == activeOutChannel and theme.color.listActive or theme.color.inputBg,
+				hoverBg = theme.color.hover,
+				text = chSpec.label,
+				textSize = 10,
+				bold = true,
+				color = theme.color.sideBarText,
+				radius = 10,
+				order = idx,
+				zIndex = 24,
+				activeState = function() return chSpec.id == activeOutChannel end,
+				onClick = function()
+					activeOutChannel = chSpec.id
+					for cid, b in pairs(outChannelBtns) do
+						b.BackgroundColor3 = (cid == activeOutChannel) and theme.color.listActive or theme.color.inputBg
+						b.BackgroundTransparency = 0
+					end
+					if renderOutput then renderOutput() end
+				end,
+			})
+			cb.BackgroundTransparency = 0
+			outChannelBtns[chSpec.id] = cb
+		end
+
+		-- 4. Multi-Tab TERMINAL view
 		local termPane = P.frame(bodyArea, { name = "TerminalView", size = UDim2.fromScale(1, 1), visible = false, zIndex = 22 })
+		local sessionBar = P.frame(termPane, {
+			name = "TerminalSessionBar",
+			size = UDim2.new(1, 0, 0, 22),
+			bg = theme.color.sideBarHeader,
+			zIndex = 23,
+		})
+		P.pad(sessionBar, 0, 6, 0, 6)
+		P.list(sessionBar, Enum.FillDirection.Horizontal, 4, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+
 		local termScroll = P.scroll(termPane, {
 			name = "TerminalScroll",
-			size = UDim2.new(1, 0, 1, -30),
+			size = UDim2.new(1, 0, 1, -52),
+			pos = UDim2.fromOffset(0, 22),
 			zIndex = 23,
 		})
 		P.pad(termScroll, 6, 10, 4, 10)
@@ -181,23 +261,49 @@ return function(env)
 			zIndex = 23,
 		})
 		local promptGlyph = P.label(promptRow, {
-			size = UDim2.fromOffset(22, 28),
+			size = UDim2.fromOffset(108, 28),
 			pos = UDim2.fromOffset(8, 0),
-			text = "❯",
+			text = "default:~ ❯",
 			mono = true,
 			bold = true,
+			textSize = 11,
 			color = theme.color.accent,
+			truncate = true,
 			zIndex = 24,
 		})
 		local _, termInput = P.input(promptRow, {
 			name = "TerminalCommandInput",
-			size = UDim2.new(1, -36, 0, 24),
-			pos = UDim2.fromOffset(28, 2),
+			size = UDim2.new(1, -168, 0, 24),
+			pos = UDim2.fromOffset(118, 2),
 			mono = true,
-			placeholder = "Type command (help, ls, git clone owner/repo, git push, run, luau ...)",
+			placeholder = "Type command (help, ls -l, tree, git diff, rblx services, bundle...)",
 			zIndex = 24,
 		})
+		local tabCompBtn = P.button(promptRow, {
+			name = "TerminalAutocompleteBtn",
+			size = UDim2.fromOffset(42, 22),
+			pos = UDim2.new(1, -46, 0, 3),
+			bg = theme.color.inputBg,
+			hoverBg = theme.color.hover,
+			text = "Tab ⇥",
+			mono = true,
+			textSize = 10,
+			radius = 3,
+			zIndex = 24,
+			onClick = function()
+				local completed, matches = terminalCmds.autocomplete(termInput.Text)
+				termInput.Text = completed
+				pcall(function() termInput.CursorPosition = #completed + 1 end)
+				if #matches > 1 then
+					terminalCmds.print("Completions: " .. table.concat(matches, "   "))
+				end
+			end,
+		})
+
+		local termFocused = false
+		termInput.Focused:Connect(function() termFocused = true end)
 		termInput.FocusLost:Connect(function(enterPressed)
+			termFocused = false
 			if enterPressed and termInput.Text ~= "" then
 				local cmd = termInput.Text
 				termInput.Text = ""
@@ -205,6 +311,36 @@ return function(env)
 				task.defer(function() pcall(function() termInput:CaptureFocus() end) end)
 			end
 		end)
+
+		if env.uis then
+			dispose.connection(env.uis.InputBegan:Connect(function(input)
+				if not termFocused then return end
+				local kc = input.KeyCode
+				if kc == Enum.KeyCode.Up then
+					local prev = terminalCmds.historyPrev()
+					if prev ~= nil then
+						termInput.Text = prev
+						pcall(function() termInput.CursorPosition = #prev + 1 end)
+					end
+				elseif kc == Enum.KeyCode.Down then
+					local nxt = terminalCmds.historyNext()
+					if nxt ~= nil then
+						termInput.Text = nxt
+						pcall(function() termInput.CursorPosition = #nxt + 1 end)
+					end
+				elseif kc == Enum.KeyCode.Tab then
+					task.defer(function()
+						local clean = termInput.Text:gsub("\t", "")
+						local completed, matches = terminalCmds.autocomplete(clean)
+						termInput.Text = completed
+						pcall(function() termInput.CursorPosition = #completed + 1 end)
+						if #matches > 1 then
+							terminalCmds.print("Completions: " .. table.concat(matches, "   "))
+						end
+					end)
+				end
+			end))
+		end
 
 		-- 5. HTTP / GIT view
 		local httpScroll = P.scroll(bodyArea, { name = "HttpView", visible = false, zIndex = 22 })
@@ -342,38 +478,108 @@ return function(env)
 			end
 		end
 
-		local function renderOutput()
+		renderOutput = function()
 			outputScroll:ClearAllChildren()
-			P.pad(outputScroll, 6, 8, 6, 8)
+			P.pad(outputScroll, 4, 8, 6, 8)
 			P.list(outputScroll, Enum.FillDirection.Vertical, 1)
-			local items = log.list("all")
-			local startIdx = math.max(1, #items - 80)
+
+			local allItems = log.list("all")
+			local filtered = {}
+			for _, entry in ipairs(allItems) do
+				if activeOutChannel == "all"
+					or entry.channel == activeOutChannel
+					or (activeOutChannel == "github" and (entry.channel == "fs" or entry.channel == "git")) then
+					filtered[#filtered + 1] = entry
+				end
+			end
+
+			local startIdx = math.max(1, #filtered - 85)
 			local order = 0
-			for i = startIdx, #items do
+			for i = startIdx, #filtered do
 				order = order + 1
-				local entry = items[i]
+				local entry = filtered[i]
 				local col = theme.color.editorText
 				if entry.level == "error" then col = theme.color.bad
 				elseif entry.level == "warn" then col = theme.color.warn
-				elseif entry.channel == "github" then col = theme.color.good end
-				P.label(outputScroll, {
-					size = UDim2.new(1, 0, 0, 18),
+				elseif entry.channel == "github" or entry.channel == "roblox" then col = theme.color.good end
+
+				local loc = robloxConsole.parseStackLocation(entry.message)
+				local jumpHint = loc and "  ↗" or ""
+				local row = P.button(outputScroll, {
+					name = "OutputRow_" .. tostring(order),
+					size = UDim2.new(1, 0, 0, 19),
+					hoverBg = loc and theme.color.hover or nil,
+					alignX = Enum.TextXAlignment.Left,
 					mono = true,
 					textSize = 12,
 					color = col,
-					text = string.format("[%s][%s] %s", entry.time, entry.channel, entry.message),
-					truncate = true,
+					text = string.format("[%s][%s] %s%s", entry.time, entry.channel, entry.message, jumpHint),
 					order = order,
-					zIndex = 23,
+					zIndex = 24,
+					onClick = function()
+						if loc then
+							robloxConsole.jumpToLogEntry(entry)
+						end
+					end,
 				})
+				row.TextTruncate = Enum.TextTruncate.AtEnd
 			end
+			outputScroll.CanvasPosition = Vector2.new(0, 99999)
 		end
 
 		local function renderTerminal()
+			-- Update session tabs
+			sessionBar:ClearAllChildren()
+			P.pad(sessionBar, 0, 6, 0, 6)
+			P.list(sessionBar, Enum.FillDirection.Horizontal, 4, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+
+			for idx, sess in ipairs(terminalCmds.sessions) do
+				local isCur = (sess.id == terminalCmds.activeSessionId)
+				local chip = P.frame(sessionBar, {
+					name = "TermSession_" .. sess.id,
+					size = UDim2.fromOffset(#sess.title * 7 + 34, 18),
+					bg = isCur and theme.color.accent or theme.color.inputBg,
+					radius = 3,
+					order = idx,
+					zIndex = 24,
+				})
+				P.button(chip, {
+					size = UDim2.new(1, -18, 1, 0),
+					pos = UDim2.fromOffset(4, 0),
+					alignX = Enum.TextXAlignment.Left,
+					mono = true,
+					bold = isCur,
+					textSize = 10,
+					color = isCur and Color3.fromRGB(255, 255, 255) or theme.color.sideBarText,
+					text = "❯ " .. sess.title,
+					zIndex = 25,
+					onClick = function()
+						terminalCmds.switchSession(sess.id)
+					end,
+				})
+				P.button(chip, {
+					name = "CloseTermSession_" .. sess.id,
+					size = UDim2.fromOffset(16, 16),
+					pos = UDim2.new(1, -17, 0, 1),
+					text = "✕",
+					textSize = 9,
+					color = isCur and Color3.fromRGB(255, 255, 255) or theme.color.muted,
+					radius = 2,
+					zIndex = 25,
+					onClick = function()
+						terminalCmds.closeSession(sess.id)
+					end,
+				})
+			end
+
+			local curSess = terminalCmds.activeSession()
+			local cwdShort = (curSess and curSess.cwd ~= "") and ("~/" .. curSess.cwd) or "~"
+			promptGlyph.Text = string.format("%s:%s ❯", workspaceFs.activeName, cwdShort)
+
 			termScroll:ClearAllChildren()
 			P.pad(termScroll, 6, 10, 4, 10)
 			P.list(termScroll, Enum.FillDirection.Vertical, 2)
-			local startIdx = math.max(1, #terminalCmds.lines - 90)
+			local startIdx = math.max(1, #terminalCmds.lines - 95)
 			local order = 0
 			for i = startIdx, #terminalCmds.lines do
 				order = order + 1
@@ -429,9 +635,10 @@ return function(env)
 			config.set("workbench.activePanelTab", id, { quiet = true })
 			problemsScroll.Visible = (id == "problems")
 			todosPane.Visible = (id == "todos")
-			outputScroll.Visible = (id == "output")
+			outputPane.Visible = (id == "output")
 			termPane.Visible = (id == "terminal")
 			httpScroll.Visible = (id == "http")
+			newTermBtn.Visible = (id == "terminal")
 			for tid, btn in pairs(tabButtons) do
 				btn.TextColor3 = (tid == id) and theme.color.tabActiveText or theme.color.muted
 			end
@@ -445,7 +652,7 @@ return function(env)
 		for idx, spec in ipairs(TABS) do
 			local btn = P.button(tabRow, {
 				name = "PanelTab_" .. spec.id,
-				size = UDim2.fromOffset(#spec.label * 7 + 20, 26),
+				size = UDim2.fromOffset(#spec.label * 7 + 18, 26),
 				text = spec.label,
 				bold = true,
 				textSize = 11,
@@ -462,15 +669,22 @@ return function(env)
 		log.added:connect(function() if activeTab == "output" then renderOutput() end end)
 		log.cleared:connect(renderOutput)
 		terminalCmds.changed:connect(renderTerminal)
+		workspaceFs.changed:connect(function() if activeTab == "terminal" then renderTerminal() end end)
 		http.changed:connect(function() if activeTab == "http" then renderHttp() end end)
 		theme.changed:connect(function()
 			root.BackgroundColor3 = theme.color.panelBg
 			topRule.BackgroundColor3 = theme.color.border
 			header.BackgroundColor3 = theme.color.panelHeader
+			sessionBar.BackgroundColor3 = theme.color.sideBarHeader
 			promptRow.BackgroundColor3 = theme.color.sideBar
 			promptGlyph.TextColor3 = theme.color.accent
+			tabCompBtn.BackgroundColor3 = theme.color.inputBg
 			for fid, b in pairs(filterBtns) do
 				b.BackgroundColor3 = (fid == activeTodoFilter) and theme.color.listActive or theme.color.inputBg
+				b.TextColor3 = theme.color.sideBarText
+			end
+			for cid, b in pairs(outChannelBtns) do
+				b.BackgroundColor3 = (cid == activeOutChannel) and theme.color.listActive or theme.color.inputBg
 				b.TextColor3 = theme.color.sideBarText
 			end
 			selectTab(activeTab)
@@ -485,9 +699,14 @@ return function(env)
 			header = header,
 			promptRow = promptRow,
 			selectTab = selectTab,
+			setOutputChannel = function(ch)
+				activeOutChannel = ch or "all"
+				if activeTab == "output" then renderOutput() end
+			end,
 			setTransparency = function(bgTrans)
 				root.BackgroundTransparency = bgTrans
 				header.BackgroundTransparency = bgTrans
+				sessionBar.BackgroundTransparency = bgTrans
 				promptRow.BackgroundTransparency = bgTrans
 			end,
 			focusTerminal = function()

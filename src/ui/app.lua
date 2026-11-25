@@ -32,9 +32,11 @@ return function(env)
 	local codeStore = env.require("runtime/code_store")
 	local clipboard = env.require("runtime/clipboard")
 	local sessionJournal = env.require("runtime/session_journal")
+	local robloxConsole = env.require("runtime/roblox_console")
 	local gitState = env.require("runtime/git_state")
 	local commands = env.require("runtime/command_catalog")
 	local shortcuts = env.require("runtime/shortcuts")
+	local githubNet = env.require("net/github")
 	local tools = env.require("tools/init")
 
 	local M = {}
@@ -542,8 +544,20 @@ return function(env)
 					})
 				else
 					local ok, err = codeStore.save(doc.id)
-					if ok then overlay.toast("Saved " .. doc.path, "good", 2)
-					else overlay.toast("Save failed: " .. tostring(err), "bad", 4) end
+					if ok then
+						if doc.path == ".vsrblx/settings.json" or doc.path == "settings.json" then
+							local importedOk, impErr = config.importJson(doc.content)
+							if importedOk then
+								overlay.toast("Synced settings.json -> live Workbench config", "good", 2.4)
+							else
+								overlay.toast("settings.json JSON error: " .. tostring(impErr), "bad", 4)
+							end
+						else
+							overlay.toast("Saved " .. doc.path, "good", 2)
+						end
+					else
+						overlay.toast("Save failed: " .. tostring(err), "bad", 4)
+					end
 				end
 			end)
 
@@ -727,12 +741,160 @@ return function(env)
 					confirmText = "Create Branch",
 					onConfirm = function(name)
 						task.spawn(function()
-							local created, err = tools.githubSync.createBranch(name)
-							if created then overlay.toast("Switched to branch " .. name, "good", 3)
-							else overlay.toast("Branch error: " .. tostring(err), "bad", 4) end
+							if gitState.repo then
+								local created, err = tools.githubSync.createBranch(name)
+								if created then overlay.toast("Switched to branch " .. name, "good", 3)
+								else overlay.toast("Branch error: " .. tostring(err), "bad", 4) end
+							else
+								gitState.branch = name
+								gitState.saveMeta()
+								gitState.changed:fire()
+								overlay.toast("Switched local branch to " .. name, "good", 2.5)
+							end
 						end)
 					end,
 				})
+			end)
+
+			reg("github.switchBranch", "Switch or Create Git Branch...", "GitHub", nil, function()
+				local menu = {
+					{
+						label = "+ Create New Branch...",
+						onClick = function() commands.run("github.createBranch") end,
+					},
+					{
+						label = "↻ Pull Latest Remote Tree",
+						onClick = function() commands.run("github.pull") end,
+					},
+					{
+						label = "⎇ Open Source Control View",
+						shortcut = "Ctrl+Shift+G",
+						onClick = function() selectViewlet("scm", false) end,
+					},
+					{ separator = true },
+				}
+
+				local curBranch = gitState.branch or "main"
+				local knownBranches = { curBranch }
+				if curBranch ~= "main" then knownBranches[#knownBranches + 1] = "main" end
+
+				local function showMenu(branchNames)
+					local seen = {}
+					for _, bName in ipairs(branchNames) do
+						if not seen[bName] then
+							seen[bName] = true
+							menu[#menu + 1] = {
+								label = (bName == curBranch and "✓ ⎇ " or "   ⎇ ") .. bName,
+								onClick = function()
+									gitState.branch = bName
+									gitState.saveMeta()
+									gitState.changed:fire()
+									if gitState.repo then
+										task.spawn(function()
+											local snap, err = tools.githubSync.cloneRepo(gitState.repo, { branch = bName })
+											if snap then overlay.toast("Checked out " .. bName, "good", 2.5)
+											else overlay.toast("Checkout failed: " .. tostring(err), "bad", 4) end
+										end)
+									else
+										overlay.toast("Switched branch to " .. bName, "good", 2)
+									end
+								end,
+							}
+						end
+					end
+					local p = statusBar.branchButton and statusBar.branchButton.AbsolutePosition or Vector2.new(80, 420)
+					overlay.dropdown(math.max(12, p.X), math.max(24, p.Y - (#menu * 24 + 16)), menu, 230)
+				end
+
+				if gitState.repo then
+					task.spawn(function()
+						local o, r = gitState.repo:match("^([^/]+)/([^/]+)$")
+						local names = (o and r) and githubNet.listBranches(o, r) or nil
+						if type(names) == "table" and #names > 0 then
+							showMenu(names)
+						else
+							showMenu(knownBranches)
+						end
+					end)
+				else
+					showMenu(knownBranches)
+				end
+			end)
+
+			reg("github.importGist", "Import GitHub Gist into Workspace...", "GitHub", nil, function()
+				overlay.prompt({
+					title = "Import GitHub Gist",
+					subtitle = "Enter a Gist ID or https://gist.github.com/... URL",
+					placeholder = "a1b2c3d4e5f6...",
+					mono = true,
+					confirmText = "Import Gist",
+					onConfirm = function(spec)
+						if spec == "" then return end
+						task.spawn(function()
+							local res, err = tools.githubSync.importGist(spec)
+							if res then
+								overlay.toast(string.format("Imported %d Gist file(s) to disk", res.count), "good", 3)
+							else
+								overlay.toast("Gist import failed: " .. tostring(err), "bad", 4)
+							end
+						end)
+					end,
+				})
+			end)
+
+			reg("github.publishGist", "Publish Active Buffer to GitHub Gist", "GitHub", nil, function()
+				task.spawn(function()
+					local res, err = tools.githubSync.publishActiveGist({ public = false })
+					if res then
+						overlay.toast("Published Secret Gist (URL copied!)", "good", 3.5)
+					else
+						overlay.toast("Gist publish failed: " .. tostring(err), "bad", 4)
+					end
+				end)
+			end)
+
+			reg("roblox.pickInstance", "Eyedropper: Pick In-Game 3D / GUI Instance Path", "Roblox", nil, function()
+				tools.instancePicker.start(screenGui, win, function(luauPath, inst)
+					focusedEditor().runAction("insertText", luauPath)
+					overlay.toast("Inserted & copied: " .. luauPath .. " (" .. tostring(inst and inst.ClassName or "Instance") .. ")", "good", 3)
+				end)
+			end)
+
+			reg("roblox.showConsole", "Open Live Roblox LogService Console", "Roblox", nil, function()
+				if zenMode then setZenMode(false) end
+				panelVisible = true
+				bottomTerminal.selectTab("output")
+				if bottomTerminal.setOutputChannel then
+					bottomTerminal.setOutputChannel("roblox")
+				end
+				reflowWorkbench()
+			end)
+
+			reg("workspace.bundle", "Bundle Workspace into Standalone Luau Script", "Build", "Ctrl+Shift+B", function()
+				local res, err = tools.projectBundler.bundleWorkspace()
+				if not res then
+					overlay.toast("Bundle failed: " .. tostring(err), "bad", 4)
+					return nil
+				end
+				codeStore.openFile(res.outputPath, { reloadFromDisk = true })
+				overlay.toast(string.format("Bundled %d modules -> %s (copied!)", res.modules, res.outputPath), "good", 3.5)
+				return res
+			end)
+
+			reg("terminal.newSession", "Create New Integrated Terminal Session", "Terminal", nil, function()
+				if zenMode then setZenMode(false) end
+				panelVisible = true
+				bottomTerminal.selectTab("terminal")
+				reflowWorkbench()
+				local sess = tools.terminal.newSession()
+				bottomTerminal.focusTerminal()
+				return sess
+			end)
+
+			reg("preferences.openSettingsJson", "Preferences: Open settings.json (JSON)", "Preferences", nil, function()
+				local jsonBody = config.exportJson()
+				workspaceFs.writeFile(".vsrblx/settings.json", jsonBody)
+				return codeStore.openFile(".vsrblx/settings.json", { reloadFromDisk = true })
 			end)
 
 			reg("workspace.switch", "Switch or Create Local Disk Workspace...", "Workspace", nil, function()
@@ -795,6 +957,7 @@ return function(env)
 		registerCommands()
 		bindShortcuts()
 		clipboard.load()
+		robloxConsole.install()
 
 		-- Restore previous session tabs & unsaved crash drafts, or open starter files
 		local restoredSession, recoveredDrafts = sessionJournal.restore()

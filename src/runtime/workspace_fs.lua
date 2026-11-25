@@ -300,6 +300,23 @@ return function(env)
 		return out
 	end
 
+	M.listTree = M.listDir
+
+	function M.allFiles(subDir)
+		local out = {}
+		for _, item in ipairs(M.listAllFiles(subDir or "")) do
+			out[#out + 1] = item.path
+		end
+		return out
+	end
+
+	function M.diskPath(relPath)
+		local clean = util.normalisePath(relPath or "")
+		local root = M.diskRootLabel()
+		if clean == "" then return root end
+		return root .. "/" .. clean
+	end
+
 	function M.replaceWorkspaceFiles(filesMap, opts)
 		opts = opts or {}
 		if opts.clean then

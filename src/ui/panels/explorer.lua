@@ -1,5 +1,6 @@
--- VS Code Explorer Sidebar Viewlet: Open Editors, Local Disk File Tree (`writefile`/
--- `readfile`), and Live Roblox DataModel Script Importer.
+-- VS Code Explorer Sidebar Viewlet:
+-- Open Editors, Local Disk File Tree (`writefile`/`readfile`), and Live Roblox DataModel
+-- Explorer (3D/GUI Eyedropper Picker, Copy Luau Path, Property Inspector & Script Decompiler).
 return function(env)
 	local P = env.require("ui/primitives")
 	local theme = env.require("ui/theme")
@@ -7,7 +8,9 @@ return function(env)
 	local explorerTreeMod = env.require("ui/code/explorer")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
+	local clipboard = env.require("runtime/clipboard")
 	local robloxExplorer = env.require("runtime/roblox_explorer")
+	local commands = env.require("runtime/command_catalog")
 	local decompiler = env.require("tools/decompiler")
 	local fsSync = env.require("tools/fs_sync")
 	local overlay = env.require("ui/overlay")
@@ -26,7 +29,7 @@ return function(env)
 			zIndex = 22,
 		})
 		P.label(titleRow, {
-			size = UDim2.new(1, -112, 1, 0),
+			size = UDim2.new(1, -134, 1, 0),
 			pos = UDim2.fromOffset(12, 0),
 			text = "EXPLORER",
 			bold = true,
@@ -36,8 +39,8 @@ return function(env)
 		})
 
 		local toolRow = P.frame(titleRow, {
-			size = UDim2.fromOffset(104, 26),
-			pos = UDim2.new(1, -108, 0, 2),
+			size = UDim2.fromOffset(128, 26),
+			pos = UDim2.new(1, -132, 0, 2),
 			zIndex = 23,
 		})
 		P.list(toolRow, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
@@ -82,6 +85,18 @@ return function(env)
 			local n = codeStore.saveAll()
 			overlay.toast(string.format("Saved %d file(s) to disk", n), "good", 2)
 		end)
+		P.button(toolRow, {
+			name = "BundleProjectBtn",
+			size = UDim2.fromOffset(24, 22),
+			text = "📦",
+			textSize = 12,
+			radius = 3,
+			order = 5,
+			zIndex = 24,
+			onClick = function()
+				commands.run("workspace.bundle")
+			end,
+		})
 		redrawToolbarIcons()
 
 		local scroll = P.scroll(root, {
@@ -148,21 +163,42 @@ return function(env)
 		treeWrap.AutomaticSize = Enum.AutomaticSize.Y
 		fileTree = explorerTreeMod.new(treeWrap)
 
-		-- Section 3: Roblox Game Explorer
+		-- Section 3: Roblox Game DataModel Explorer + Eyedropper
 		local gameExpanded = false
-		local gameBtn = P.button(scroll, {
-			name = "GameTreeToggle",
+		local gameHeader = P.frame(scroll, {
 			size = UDim2.new(1, 0, 0, 22),
 			bg = theme.color.sideBarHeader,
+			order = 5,
+			zIndex = 23,
+		})
+		local gameBtn = P.button(gameHeader, {
+			name = "GameTreeToggle",
+			size = UDim2.new(1, -58, 1, 0),
 			hoverBg = theme.color.hover,
 			alignX = Enum.TextXAlignment.Left,
 			bold = true,
 			textSize = 11,
 			color = theme.color.sideBarText,
 			text = "  ▸ ROBLOX DATAMODEL",
-			order = 5,
-			zIndex = 23,
+			zIndex = 24,
 		})
+		P.button(gameHeader, {
+			name = "DataModelEyedropperBtn",
+			size = UDim2.fromOffset(52, 18),
+			pos = UDim2.new(1, -56, 0, 2),
+			bg = theme.color.accent,
+			hoverBg = theme.color.accentHover,
+			color = Color3.fromRGB(255, 255, 255),
+			bold = true,
+			text = "🎯 Pick",
+			textSize = 10,
+			radius = 3,
+			zIndex = 25,
+			onClick = function()
+				commands.run("roblox.pickInstance")
+			end,
+		})
+
 		local gameContainer = P.frame(scroll, {
 			size = UDim2.new(1, 0, 0, 0),
 			visible = false,
@@ -171,6 +207,25 @@ return function(env)
 		})
 		gameContainer.AutomaticSize = Enum.AutomaticSize.Y
 		P.list(gameContainer, Enum.FillDirection.Vertical, 1)
+
+		local function openInstanceInspector(inst)
+			local props = robloxExplorer.inspectProperties(inst)
+			local luauPath = robloxExplorer.luauPathOf(inst)
+			local lines = {
+				"-- Roblox Instance Inspector (Read-Only Snapshot)",
+				"-- Luau Path: " .. luauPath,
+				"",
+				"local target = " .. luauPath,
+				"local properties = {",
+			}
+			for _, kv in ipairs(props) do
+				lines[#lines + 1] = string.format("\t[%q] = %q,", kv.key, kv.value)
+			end
+			lines[#lines + 1] = "}"
+			local doc = codeStore.newUntitled(table.concat(lines, "\n"), "luau")
+			doc.title = "Inspect: " .. tostring(inst.Name)
+			codeStore.changed:fire({ reason = "inspect", id = doc.id })
+		end
 
 		local expandedInstances = {}
 		local function renderGameTree()
@@ -183,26 +238,64 @@ return function(env)
 				if depth > 5 or ord > 80 then return end
 				for _, ch in ipairs(robloxExplorer.childrenOf(inst, 40)) do
 					ord = ord + 1
-					local row = P.button(gameContainer, {
+					local row = P.frame(gameContainer, {
 						size = UDim2.new(1, 0, 0, 21),
+						order = ord,
+						zIndex = 24,
+					})
+					local mainBtn = P.button(row, {
+						size = UDim2.new(1, -42, 1, 0),
 						hoverBg = theme.color.hover,
 						alignX = Enum.TextXAlignment.Left,
 						textSize = 11,
 						color = ch.isScript and theme.color.accent or theme.color.sideBarText,
 						text = string.rep("   ", depth) .. (ch.isScript and "📜 " or (ch.hasChildren and "▸ " or "  ")) .. ch.name .. " (" .. ch.className .. ")",
-						order = ord,
-						zIndex = 24,
+						zIndex = 25,
 						onClick = function()
 							if ch.isScript then
 								decompiler.openInstanceScript(ch.instance, true)
-								overlay.toast("Imported " .. ch.name .. " to workspace", "good", 2.5)
+								overlay.toast("Decompiled & saved " .. ch.name .. " to disk", "good", 2.5)
 							elseif ch.hasChildren then
 								expandedInstances[ch.instance] = not expandedInstances[ch.instance]
 								renderGameTree()
+							else
+								openInstanceInspector(ch.instance)
 							end
 						end,
 					})
-					row.TextTruncate = Enum.TextTruncate.AtEnd
+					mainBtn.TextTruncate = Enum.TextTruncate.AtEnd
+
+					-- Copy Luau Path (`📋`)
+					P.button(row, {
+						name = "CopyPath_" .. ch.name,
+						size = UDim2.fromOffset(18, 18),
+						pos = UDim2.new(1, -40, 0, 1),
+						text = "📋",
+						textSize = 10,
+						radius = 2,
+						zIndex = 26,
+						onClick = function()
+							local lp = robloxExplorer.luauPathOf(ch.instance)
+							clipboard.copy(lp)
+							overlay.toast("Copied Luau path: " .. lp, "good", 2.2)
+						end,
+					})
+
+					-- Inspect Properties (`ℹ`)
+					P.button(row, {
+						name = "InspectInst_" .. ch.name,
+						size = UDim2.fromOffset(18, 18),
+						pos = UDim2.new(1, -20, 0, 1),
+						text = "ℹ",
+						textSize = 10,
+						color = theme.color.accent,
+						radius = 2,
+						zIndex = 26,
+						onClick = function()
+							openInstanceInspector(ch.instance)
+						end,
+					})
+
 					if expandedInstances[ch.instance] then
 						walkInst(ch.instance, ch.name, depth + 1)
 					end
@@ -299,7 +392,7 @@ return function(env)
 		theme.changed:connect(function()
 			openHeader.BackgroundColor3 = theme.color.sideBarHeader
 			wsHeader.BackgroundColor3 = theme.color.sideBarHeader
-			gameBtn.BackgroundColor3 = theme.color.sideBarHeader
+			gameHeader.BackgroundColor3 = theme.color.sideBarHeader
 			redrawToolbarIcons()
 			renderOpenEditors()
 			if gameExpanded then renderGameTree() end

@@ -19,6 +19,8 @@ return function(env)
 	local colorUtils = env.require("runtime/color_utils")
 	local editorActions = env.require("runtime/editor_actions")
 	local clipboard = env.require("runtime/clipboard")
+	local codeDiff = env.require("runtime/code_diff")
+	local gitState = env.require("runtime/git_state")
 	local intellisense = env.require("runtime/intellisense")
 	local diagnostics = env.require("runtime/diagnostics")
 
@@ -282,10 +284,12 @@ return function(env)
 		local linePool = {}
 		local numPool = {}
 		local diagDotPool = {}
+		local gitBarPool = {}
 		local squigglePool = {}
 		local errorLensPool = {}
 		local guidePool = {}
 		local swatchPool = {}
+		local gitLineMarkers = {}
 		local findMatches = {}
 		local findIndex = 0
 		local currentSuggestions = {}
@@ -307,10 +311,21 @@ return function(env)
 			if not currentDoc then
 				foldRegions = {}
 				docSymbols = {}
+				gitLineMarkers = {}
 				return
 			end
 			foldRegions = codeFolding.regions(currentDoc.content)
 			docSymbols = codeFolding.symbols(currentDoc.content, currentDoc.langId)
+			if currentDoc.path ~= "" and config.get("git.gutterDecorations", true) ~= false then
+				local base = gitState.originalContent(currentDoc.path)
+				if base ~= nil then
+					gitLineMarkers = codeDiff.lineMarkers(base, currentDoc.content)
+				else
+					gitLineMarkers = {}
+				end
+			else
+				gitLineMarkers = {}
+			end
 		end
 
 		local function updateLayoutWidths()
@@ -372,8 +387,15 @@ return function(env)
 					visible = false,
 					zIndex = 17,
 				})
+				gitBarPool[slot] = P.frame(gutter, {
+					name = "GitDiffBar_" .. tostring(slot),
+					size = UDim2.fromOffset(3, theme.sizes.editorLineHeight),
+					bg = theme.color.good,
+					visible = false,
+					zIndex = 19,
+				})
 			end
-			return linePool[slot], numPool[slot], diagDotPool[slot], squigglePool[slot], errorLensPool[slot]
+			return linePool[slot], numPool[slot], diagDotPool[slot], squigglePool[slot], errorLensPool[slot], gitBarPool[slot]
 		end
 
 		local function ensureGuideWidget(idx)
@@ -545,7 +567,7 @@ return function(env)
 			for ln = firstVisible, lastVisible do
 				slot = slot + 1
 				local lineStr = lexCache.lines[ln] or ""
-				local codeLbl, numLbl, dot, squiggle, errLens = ensureRowWidgets(slot)
+				local codeLbl, numLbl, dot, squiggle, errLens, gitBar = ensureRowWidgets(slot)
 				codeLbl.Visible = not hasSelection
 				codeLbl.Position = UDim2.fromOffset(0, (ln - 1) * lh)
 				codeLbl.Size = UDim2.fromOffset(contentW - gutterW - 16, lh)
@@ -559,6 +581,27 @@ return function(env)
 				numLbl.TextSize = math.max(11, fontSz - 1)
 				numLbl.Text = tostring(ln)
 				numLbl.TextColor3 = (ln == curLine) and theme.color.lineNumberActive or theme.color.lineNumber
+
+				-- Live Git Gutter Diff Bar (green = add, blue = modify, red = delete)
+				local gKind = gitLineMarkers[ln]
+				if gKind then
+					gitBar.Visible = true
+					if gKind == "add" then
+						gitBar.BackgroundColor3 = theme.color.good
+						gitBar.Position = UDim2.fromOffset(gutterW - 4, 6 + (ln - 1) * lh + 1)
+						gitBar.Size = UDim2.fromOffset(3, lh - 2)
+					elseif gKind == "modify" then
+						gitBar.BackgroundColor3 = theme.color.accent
+						gitBar.Position = UDim2.fromOffset(gutterW - 4, 6 + (ln - 1) * lh + 1)
+						gitBar.Size = UDim2.fromOffset(3, lh - 2)
+					else
+						gitBar.BackgroundColor3 = theme.color.bad
+						gitBar.Position = UDim2.fromOffset(gutterW - 6, 6 + (ln - 1) * lh + lh - 4)
+						gitBar.Size = UDim2.fromOffset(5, 4)
+					end
+				else
+					gitBar.Visible = false
+				end
 
 				-- Vertical Indent Guides
 				if showGuides then
@@ -639,6 +682,7 @@ return function(env)
 				diagDotPool[k].Visible = false
 				squigglePool[k].Visible = false
 				errorLensPool[k].Visible = false
+				if gitBarPool[k] then gitBarPool[k].Visible = false end
 			end
 			for k = guideCount + 1, #guidePool do
 				guidePool[k].Visible = false
@@ -987,7 +1031,12 @@ return function(env)
 				drawVisibleLines()
 			end
 		end)
+		gitState.changed:connect(function()
+			updateSymbolsAndRegions()
+			drawVisibleLines()
+		end)
 		config.changed:connect(function()
+			updateSymbolsAndRegions()
 			updateLayoutWidths()
 			drawVisibleLines()
 		end)

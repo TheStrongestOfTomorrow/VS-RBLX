@@ -6,6 +6,7 @@ return function(env)
 	local config = env.require("runtime/config")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
+	local clipboard = env.require("runtime/clipboard")
 	local gitState = env.require("runtime/git_state")
 	local github = env.require("net/github")
 	local gist = env.require("net/gist")
@@ -181,6 +182,49 @@ return function(env)
 		if not loaded then return nil, err end
 		workspaceFs.writeFile(loaded.name, loaded.content)
 		return codeStore.openFile(loaded.name, { reloadFromDisk = true })
+	end
+
+	function M.importGist(gistIdOrUrl)
+		local files, err = gist.loadGist(gistIdOrUrl)
+		if not files then return nil, err end
+		local firstDoc = nil
+		local count = 0
+		for fname, content in pairs(files) do
+			local relPath = "gists/" .. util.basename(fname)
+			workspaceFs.writeFile(relPath, content)
+			local doc = codeStore.openFile(relPath, { reloadFromDisk = true })
+			if not firstDoc then firstDoc = doc end
+			count = count + 1
+		end
+		return {
+			count = count,
+			doc = firstDoc,
+		}
+	end
+
+	function M.publishActiveGist(opts)
+		opts = opts or {}
+		local files = {}
+		if opts.allOpen then
+			for _, tab in ipairs(codeStore.tabs) do
+				if not tab.isDiff then
+					files[tab.title] = tab.content
+				end
+			end
+		else
+			local doc = codeStore.active()
+			if not doc then return nil, "Open a file before publishing a Gist." end
+			files[doc.title] = doc.content
+		end
+		local res, err = gist.publishGist({
+			description = opts.description or ("Published from VS-RBLX (" .. workspaceFs.activeName .. ")"),
+			public = opts.public == true,
+			files = files,
+		})
+		if res and res.url then
+			clipboard.copy(res.url)
+		end
+		return res, err
 	end
 
 	return M

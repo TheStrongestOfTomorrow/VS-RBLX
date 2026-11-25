@@ -1,6 +1,7 @@
 -- Authentic VS Code 22px Bottom Status Bar:
--- Left: Executor Host / Disk indicator, Git branch, Sync button, Error/Warn counts.
--- Right: Cursor Ln/Col, Spaces/Tab size, UTF-8, LF, Language Mode Picker, Notifications.
+-- Left: Executor Host / Disk indicator, Interactive Branch Switcher (`⎇`), Sync button,
+-- Eyedropper Picker (`🎯`), Error/Warn counts, TODO counter.
+-- Right: Cursor Ln/Col, Spaces/Tab size, UTF-8, Language Mode Picker.
 return function(env)
 	local P = env.require("ui/primitives")
 	local theme = env.require("ui/theme")
@@ -30,14 +31,14 @@ return function(env)
 
 		local leftRow = P.frame(bar, {
 			name = "StatusLeft",
-			size = UDim2.new(0.55, 0, 1, 0),
+			size = UDim2.new(0.60, 0, 1, 0),
 			zIndex = 31,
 		})
 		P.list(leftRow, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 
 		local hostPill = P.button(leftRow, {
 			name = "HostBadge",
-			size = UDim2.fromOffset(142, h),
+			size = UDim2.fromOffset(136, h),
 			bg = theme.color.statusBarRemote,
 			hoverBg = theme.color.accentHover,
 			color = theme.color.statusBarText,
@@ -51,13 +52,15 @@ return function(env)
 
 		local branchBtn = P.button(leftRow, {
 			name = "BranchBadge",
-			size = UDim2.fromOffset(115, h),
+			size = UDim2.fromOffset(108, h),
 			color = theme.color.statusBarText,
 			textSize = 11,
 			text = "⎇ main",
 			order = 2,
 			zIndex = 32,
-			onClick = function() commands.run("view.scm") end,
+			onClick = function()
+				commands.run("github.switchBranch")
+			end,
 		})
 
 		local syncBtn = P.button(leftRow, {
@@ -77,32 +80,45 @@ return function(env)
 			end,
 		})
 
+		local pickerBtn = P.button(leftRow, {
+			name = "EyedropperBadge",
+			size = UDim2.fromOffset(58, h),
+			color = theme.color.statusBarText,
+			textSize = 11,
+			text = "🎯 Pick",
+			order = 4,
+			zIndex = 32,
+			onClick = function()
+				commands.run("roblox.pickInstance")
+			end,
+		})
+
 		local problemsBtn = P.button(leftRow, {
 			name = "ProblemsBadge",
-			size = UDim2.fromOffset(72, h),
+			size = UDim2.fromOffset(68, h),
 			color = theme.color.statusBarText,
 			textSize = 11,
 			text = "⊗ 0  ⚠ 0",
-			order = 4,
+			order = 5,
 			zIndex = 32,
 			onClick = function() commands.run("view.problems") end,
 		})
 
 		local todosBtn = P.button(leftRow, {
 			name = "TodosBadge",
-			size = UDim2.fromOffset(66, h),
+			size = UDim2.fromOffset(64, h),
 			color = theme.color.statusBarText,
 			textSize = 11,
 			text = "✓ 0 TODO",
-			order = 5,
+			order = 6,
 			zIndex = 32,
 			onClick = function() commands.run("view.todos") end,
 		})
 
 		local rightRow = P.frame(bar, {
 			name = "StatusRight",
-			size = UDim2.new(0.45, -8, 1, 0),
-			pos = UDim2.new(0.55, 0, 0, 0),
+			size = UDim2.new(0.40, -8, 1, 0),
+			pos = UDim2.new(0.60, 0, 0, 0),
 			zIndex = 31,
 		})
 		P.list(rightRow, Enum.FillDirection.Horizontal, 4, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
@@ -144,7 +160,7 @@ return function(env)
 
 		local langBtn = P.button(rightRow, {
 			name = "LanguageBadge",
-			size = UDim2.fromOffset(88, h),
+			size = UDim2.fromOffset(86, h),
 			color = theme.color.statusBarText,
 			bold = true,
 			textSize = 11,
@@ -215,7 +231,7 @@ return function(env)
 		theme.changed:connect(function()
 			bar.BackgroundColor3 = theme.color.statusBar
 			hostPill.BackgroundColor3 = theme.color.statusBarRemote
-			for _, w in ipairs({ hostPill, branchBtn, syncBtn, problemsBtn, todosBtn, cursorLbl, indentBtn, utfLbl, langBtn }) do
+			for _, w in ipairs({ hostPill, branchBtn, syncBtn, pickerBtn, problemsBtn, todosBtn, cursorLbl, indentBtn, utfLbl, langBtn }) do
 				w.TextColor3 = theme.color.statusBarText
 			end
 		end)
@@ -223,6 +239,7 @@ return function(env)
 		refresh()
 		return {
 			root = bar,
+			branchButton = branchBtn,
 			refresh = refresh,
 		}
 	end

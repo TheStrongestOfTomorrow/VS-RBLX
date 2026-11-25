@@ -54,6 +54,13 @@ return function(env)
 			activeBranch = "main",
 			autoSyncOnPush = true,
 		},
+		git = {
+			sideBySideDiff = true,
+			gutterDecorations = true,
+		},
+		roblox = {
+			captureLogService = true,
+		},
 		window = {
 			autoResize = true,
 			widthScale = 0.84,
@@ -174,6 +181,21 @@ return function(env)
 
 	function M.exportJson()
 		return util.jsonEncode(M.data) or "{}"
+	end
+
+	function M.importJson(rawJson)
+		if type(rawJson) ~= "string" or rawJson == "" then
+			return false, "Empty JSON string"
+		end
+		local decoded, err = util.jsonDecode(rawJson)
+		if type(decoded) ~= "table" then
+			return false, tostring(err or "Invalid JSON object")
+		end
+		M.data = decoded
+		mergeDefaults(M.data, DEFAULTS)
+		M.saveNow()
+		M.changed:fire("*", M.data, nil)
+		return true
 	end
 
 	return M

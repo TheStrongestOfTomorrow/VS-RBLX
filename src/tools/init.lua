@@ -7,6 +7,8 @@ return function(env)
 		execution = env.require("tools/execution"),
 		decompiler = env.require("tools/decompiler"),
 		terminal = env.require("tools/terminal_cmds"),
+		instancePicker = env.require("tools/instance_picker"),
+		projectBundler = env.require("tools/project_bundler"),
 	}
 	return M
 end
