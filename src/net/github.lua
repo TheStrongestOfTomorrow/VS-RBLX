@@ -4,6 +4,7 @@
 return function(env)
 	local util = env.require("runtime/util")
 	local config = env.require("runtime/config")
+	local cryptoVault = env.require("runtime/crypto_vault")
 	local log = env.require("runtime/log")
 	local http = env.require("net/http")
 	local urlUtil = env.require("net/url")
@@ -23,11 +24,23 @@ return function(env)
 	local M = {}
 
 	function M.token()
+		if cryptoVault.isEncrypted() then
+			return tostring(cryptoVault.getSecret("github.token") or "")
+		end
 		return tostring(config.get("github.token", "") or "")
 	end
 
 	function M.setToken(pat)
 		local clean = util.trim(pat or "")
+		if cryptoVault.isEncrypted() then
+			if not cryptoVault.isUnlocked() then
+				return nil, "Master Vault is locked — unlock your 🔐 Vault before saving a PAT"
+			end
+			local ok, err = cryptoVault.setSecret("github.token", clean)
+			if not ok then return nil, err end
+			config.set("github.token", "", { immediate = true })
+			return clean
+		end
 		config.set("github.token", clean, { immediate = true })
 		return clean
 	end

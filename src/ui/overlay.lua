@@ -2,6 +2,8 @@
 return function(env)
 	local P = env.require("ui/primitives")
 	local theme = env.require("ui/theme")
+	local responsive = env.require("ui/responsive")
+	local util = env.require("runtime/util")
 
 	local M = {
 		layer = nil,
@@ -42,9 +44,17 @@ return function(env)
 		end
 	end
 
+	local function clampModalDims(prefW, prefH)
+		local vp = responsive.usableRect(6)
+		local w = math.min(prefW or 480, math.max(260, vp.width - 16))
+		local h = math.min(prefH or 320, math.max(150, vp.height - 16))
+		return w, h, vp
+	end
+
 	function M.openModal(name, width, height)
 		M.closeModal()
 		local parentTarget = M.layer
+		local clampedW, clampedH = clampModalDims(width or 480, height or 320)
 		local backdrop = P.button(parentTarget, {
 			name = "ModalBackdrop_" .. tostring(name or "Dialog"),
 			size = UDim2.fromScale(1, 1),
@@ -56,12 +66,13 @@ return function(env)
 		})
 		local card = P.frame(backdrop, {
 			name = tostring(name or "ModalCard"),
-			size = UDim2.fromOffset(width or 480, height or 320),
-			pos = UDim2.new(0.5, 0, 0.46, 0),
+			size = UDim2.fromOffset(clampedW, clampedH),
+			pos = UDim2.new(0.5, 0, 0.48, 0),
 			anchor = Vector2.new(0.5, 0.5),
 			bg = theme.color.sideBar,
 			radius = 6,
 			border = theme.color.border,
+			clip = true,
 			active = true,
 			zIndex = 231,
 		})
@@ -73,6 +84,7 @@ return function(env)
 		M.closeMenu()
 		if not M.layer then return end
 
+		local vp = responsive.usableRect(4)
 		local backdrop = P.button(M.layer, {
 			name = "MenuBackdrop",
 			size = UDim2.fromScale(1, 1),
@@ -82,21 +94,26 @@ return function(env)
 		})
 		backdrop.BackgroundTransparency = 1
 
-		local menuW = width or 220
-		local menuH = 8
+		local menuW = math.min(width or 220, math.max(160, vp.width - 12))
+		local rawH = 8
 		for _, it in ipairs(items) do
-			menuH = menuH + (it.separator and 7 or 24)
+			rawH = rawH + (it.separator and 7 or 24)
 		end
+		local menuH = math.min(rawH, math.max(120, vp.height - 16))
+		local safeX = util.clamp(math.floor(x or 8), 4, math.max(4, vp.x + vp.width - menuW - 4))
+		local safeY = util.clamp(math.floor(y or 32), 4, math.max(4, vp.y + vp.height - menuH - 4))
 
-		local card = P.frame(backdrop, {
+		local card = P.scroll(backdrop, {
 			name = "DropdownCard",
 			size = UDim2.fromOffset(menuW, menuH),
-			pos = UDim2.fromOffset(x, y),
+			pos = UDim2.fromOffset(safeX, safeY),
 			bg = theme.color.dropdownBg,
-			radius = 4,
-			border = theme.color.border,
+			transparency = 0,
+			barThickness = 4,
 			zIndex = 215,
 		})
+		P.corner(card, 4)
+		P.stroke(card, theme.color.border, 1)
 		P.pad(card, 4, 4, 4, 4)
 		P.list(card, Enum.FillDirection.Vertical, 0)
 
@@ -167,10 +184,11 @@ return function(env)
 			onClick = function() M.closeModal() end,
 		})
 
+		local promptW, promptH = clampModalDims(spec.width or 420, spec.height or 146)
 		local boxCard = P.frame(backdrop, {
 			name = "PromptModal",
-			size = UDim2.fromOffset(spec.width or 420, spec.height or 146),
-			pos = UDim2.new(0.5, 0, 0.34, 0),
+			size = UDim2.fromOffset(promptW, promptH),
+			pos = UDim2.new(0.5, 0, 0.42, 0),
 			anchor = Vector2.new(0.5, 0.5),
 			bg = theme.color.sideBar,
 			radius = 6,
@@ -276,10 +294,11 @@ return function(env)
 			end,
 		})
 
+		local confW, confH = clampModalDims(spec.width or 430, spec.height or 152)
 		local card = P.frame(backdrop, {
 			name = "ConfirmModal",
-			size = UDim2.fromOffset(spec.width or 430, spec.height or 142),
-			pos = UDim2.new(0.5, 0, 0.36, 0),
+			size = UDim2.fromOffset(confW, confH),
+			pos = UDim2.new(0.5, 0, 0.44, 0),
 			anchor = Vector2.new(0.5, 0.5),
 			bg = theme.color.sideBar,
 			radius = 6,

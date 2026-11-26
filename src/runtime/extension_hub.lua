@@ -134,6 +134,7 @@ return function(env)
 
 	local BLOCKED_SETTING_PREFIXES = {
 		"github.",
+		"vault.",
 	}
 
 	local SAFE_TRANSFORMS = {

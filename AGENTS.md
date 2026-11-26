@@ -37,61 +37,49 @@
 
 ---
 
-## 2. Current Codebase Snapshot (Post-v1 / `main` @ `e172f99`)
+## 2. Current Codebase Snapshot (Post-Sprint v2A / `arena/dd9f316f-vs-rblx`)
 
-- **Bundle**: `dist/vsrblx.lua` (`82` modules, `83` checked Lua files, `11/11` headless E2E suites passing in `test/run.lua`).
+- **Bundle**: `dist/vsrblx.lua` (`84` modules, `85` checked Lua files, `12/12` headless E2E suites passing in `test/run.lua`, build `1.0.0-836b2890e0e29e85`).
 - **Key Subsystems**:
-  - `init.lua`, `src/embedding/sdk.lua` — Bootstrap, re-execution toggle, `CoreGui` -> `PlayerGui` fallback, `getgenv().VSRBLX` SDK.
+  - `init.lua`, `src/embedding/sdk.lua` — Bootstrap, re-execution toggle, `CoreGui` -> `PlayerGui` fallback, `getgenv().VSRBLX` SDK (`api.cryptoVault`, `api.setResizeMode`, `api.toggleResizeMode`, `api.isResizeMode`).
+  - `src/runtime/crypto_vault.lua`, `src/ui/panels/vault_modal.lua` — **Zero-Knowledge Master Vault (`🔐`)**: FIPS 180-4 SHA-256, RFC 2104 HMAC-SHA256, RFC 8018 PBKDF2-HMAC-SHA256, and SHA-256-CTR + Encrypt-then-HMAC-SHA256 (`VSRBLX/vault.enc`). Master Key is never stored on disk; plaintext `github.token` is scrubbed from `settings.json`; first-boot modal lets users either `[🔐 Create Vault Key]` or `[Leave Unencrypted]`.
   - `src/runtime/fsx.lua`, `src/runtime/workspace_fs.lua`, `src/runtime/session_journal.lua` — Executor disk persistence (`writefile`/`readfile`) + virtual memory fallback + crash-draft recovery.
   - `src/runtime/languages.lua`, `src/runtime/code_lexer.lua`, `src/runtime/editor_actions.lua` — 17-language RichText lexer, Seti badges, `languages.isPreviewable(...)` gate, Monaco smart typing.
   - `src/runtime/roblox_api_db.lua`, `src/runtime/intellisense.lua` — Deep LSP-style IntelliSense (live `env.game`/`env.workspace` child introspection, variable type inference, cross-file `require("...")` symbol indexing, parameter signature help, hover docs, `F12` Go-to-Definition, `$0` snippets).
   - `src/runtime/preview_engine.lua`, `src/ui/code/preview_pane.lua` — Live Split Preview Engine (`HTML`+`style.css`, `CSS`, `Markdown`, `JSON`/`YAML` tree, `SQL` simulator, `Python`/`JS`/`TS` quick-eval; strictly hidden on non-previewable languages).
-  - `src/ui/mobile_bar.lua`, `src/ui/responsive.lua`, `src/ui/window.lua`, `src/ui/titlebar.lua`, `src/ui/app.lua` — Draggable/8-way-resizable window, Ghost opacity (`30%–100%`), Zen Mode, and Acode Mobile Mode (`☰` slide-over drawer, `42px` touch tabs, Quick-Keys bar, keyboard inset, `🎮 Play+Code` dock).
-  - `src/runtime/extension_hub.lua`, `src/ui/panels/extensions.lua`, `.github/ISSUE_TEMPLATE/`, `.github/workflows/extension-gatekeeper.yml`, `.github/scripts/validate_extension_issue.js` — Locked 5-Template Community Extension Hub (`theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, `toolbar-tool`), Client Malware Scanner, and automated GitHub Issues Gatekeeper.
+  - `src/ui/window.lua`, `src/ui/titlebar.lua`, `src/ui/code/tabs.lua`, `src/ui/statusbar.lua`, `src/ui/overlay.lua`, `src/ui/mobile_bar.lua`, `src/ui/app.lua` — Explicit Topbar Resize Toggle (`⤢` ON/OFF — OFF by default so resize hitboxes never hijack UI/moving), movable floating window in both Desktop & Mobile Mode, draggable `MinimizedPill` (`VS-RBLX ↗`), Multi-Tab Overflow Bar (`‹`, `›`, `+`, `▾ N` Open Tabs switcher), viewport-clamped Modals/Dropdowns, and zero-overlap phone-safe Desktop/Compact breakpoints (`>= 880px` full, `540–879px` `≡ Menu` + `⋯`, `< 540px` ultra-compact).
+  - `src/runtime/extension_hub.lua`, `src/ui/panels/extensions.lua`, `.github/ISSUE_TEMPLATE/`, `.github/workflows/extension-gatekeeper.yml`, `.github/scripts/validate_extension_issue.js` — Locked 5-Template Community Extension Hub (`theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, `toolbar-tool`), Client Malware Scanner (including `vault.*` setting block), and automated GitHub Issues Gatekeeper.
 
 ---
 
-## 3. Active v2 Roadmap (Pending Implementation)
+## 3. Active v2 Roadmap
 
-### [ ] Sprint v2.1 — Topbar Resize-Mode Toggle (`⤢`), Multi-Tab Bar & Zero-Overlap Layout (Mobile + Desktop)
+### [x] Combined Sprint v2A (`Sprint v2.1 + Sprint v2.2`) — **SHIPPED**
 - **Topbar Resize-Mode Toggle (`⤢` ON / OFF — Both Mobile Acode & Desktop)**:
-  - **Root cause**: Always-active invisible `Resize*` frames (`zIndex = 95`) around all 8 edges/corners intercept touch/mouse clicks on TitleBar, tabs, and scrollbars, preventing players from moving the UI cleanly.
-  - **Fix**: Keep all 8 resize handles **completely disabled & hidden (`Visible = false`, `Active = false`) by default (`Resize Mode = OFF`)**. Add a dedicated **`⤢` Resize Toggle button** on `TitleBar`:
-    - **Turn ON**: Highlights `⤢`, renders visible Push/Pull handles on all 4 edges & 4 corners, and pauses TitleBar move-dragging so players can push/pull to resize cleanly.
-    - **Turn OFF**: Hides handles, locks the new custom size, and restores smooth unobstructed TitleBar moving & UI clicks.
-- **Movable Floating Window in Mobile Mode + Draggable Minimized Pill**:
-  - Stop forcing `isMobFull` (`100%` screen lock) in Mobile Mode unless explicitly Maximized (`□`) so phone players can resize and move VS-RBLX around their screen freely; make `MinimizedPill` (`VS-RBLX ↗`) draggable so it never blocks Roblox mobile controls.
-- **True Multi-Tab Overflow Bar**:
-  - Support opening arbitrarily many files/extension views in separate persistent tabs simultaneously with horizontal scrolling, `‹ ›` scroll buttons, and a `▾` Open Tabs dropdown so tabs never squish or overwrite each other.
-- **Zero-Overlap Adaptive Desktop & Compact UI (Phone-Safe Desktop Mode)**:
-  - Root cause: `TitleBar` (`284px` menus + `252px` search pill + `328px` right controls = `864px`) and `StatusBar` (`~800px`) overlap/merge text when Desktop Mode runs on phones (`640px–844px`).
-  - Fix: Width-aware breakpoints on `TitleBar` (collapse menus into `≡ Menu`, shrink search pill to `⌕`, collapse extra toggles into `⋯`), horizontally scrollable/adaptive `StatusBar` & `BottomPanel` headers, and viewport-clamped Modals (`<= 94%` viewport W/H).
+  - All 8 `Resize*` edge/corner frames are hidden & inactive by default (`win.resizeMode = false`) so they never block TitleBar moving or UI buttons. Clicking `⤢` (`ResizeModeBtn`) turns on visible Push/Pull handles + `ResizeModeBanner` and pauses TitleBar move-dragging until `⤢` is clicked OFF again.
+- **Movable Floating Mobile Window + Draggable Minimized Pill + Multi-Tab Overflow Bar**:
+  - Mobile Mode now floats (`90% x 86%`) instead of locking full-bleed (unless Maximized `□`), moves freely by dragging `TitleBar`, resizes via `⤢`, and features a draggable `MinimizedPill` (`VS-RBLX ↗`).
+  - `src/ui/code/tabs.lua` adds `‹` / `›` horizontal scroll buttons, `+` `NewTabBtn`, and `▾ N` `AllOpenTabsBtn` dropdown switcher so dozens of tabs stay open simultaneously without squishing.
+- **Zero-Overlap Phone-Safe Breakpoints**:
+  - Adaptive `TitleBar` (`CompactMenuBtn` `≡ Menu`, `CompactMoreBtn` `⋯`), width-aware `StatusBar`, scrollable `BottomPanel` header tabs, clamped narrow Desktop Sidebar/Panel, and viewport-clamped `overlay.lua` modals/dropdowns.
+- **Zero-Knowledge Master Vault (`VSRBLX/vault.enc` — `🔐`)**:
+  - First-boot onboarding modal (`VaultSetupModal`) offering `[🔐 Create Vault Key]` vs `[Leave Unencrypted]` (`vault.mode = "off"`).
+  - Pure Lua 5.1-compatible `SHA-256` (verified against NIST FIPS 180-4 vectors), `HMAC-SHA256`, `PBKDF2-HMAC-SHA256`, and `Encrypt-then-HMAC-SHA256` stream cipher; scrubs plaintext `github.token` from `settings.json`; supports `🔒 Lock Vault` (RAM wipe) and `Wipe / Reset Vault`.
 
-### [ ] Sprint v2.2 — Zero-Knowledge Master Vault & Deep GitHub PAT Encryption (`🔐`)
-- **First-Boot Master Vault Prompt (with Clean Opt-Out)**:
-  - On first launch, prompt: **`[🔐 Create Master Vault Key]`** vs **`[Leave Unencrypted / Don't Want To]`** (which sets `vault.mode = "off"`, leaves everything unencrypted, and never nags again; re-enableable in Settings).
-- **Unrecoverable-Without-Key Cryptographic Vault (`VSRBLX/vault.enc`)**:
-  - Pure-Luau **PBKDF2-HMAC-SHA256** (with random per-vault salt) + **Authenticated Stream Cipher (Encrypt-then-HMAC-SHA256)**.
-  - Master Key is **never** persisted to disk. Once encrypted into `VSRBLX/vault.enc` (and scrubbed from plaintext `settings.json`), **not even VS-RBLX itself or any external script can recover the GitHub PAT** without the user entering their Master Key.
-  - Includes **`🔒 Lock Vault Now`** (instant RAM key/PAT wipe) + **`Reset / Wipe Vault`** for forgotten keys.
-
-### [ ] Sprint v2.3 — Zero-Rate-Limit CDN Marketplace, `[Load 10 More]`, Sub-Issue SemVer & Official `Project UAI` Tab
-- **Static CDN Paginated Registry (`registry/page-N.json`) to Beat GitHub API Rate Limits**:
+### [ ] Combined Sprint v2B (`Sprint v2.3 + Sprint v2.4`) — **NEXT UP**
+- **Static CDN Paginated Registry (`registry/page-N.json`) to Beat GitHub API Rate Limits (`v2.3`)**:
   - Unauthenticated `api.github.com` has a strict `60 req/hr` per-IP limit that breaks under shared mobile/VPN IPs.
   - Upgrade `extension-gatekeeper.yml` so verified extension issues compile into **10-per-page static JSON slices** (`registry/page-1.json`, `page-2.json`, ... + `registry/index.json`) fetched via **`raw.githubusercontent.com` Fastly CDN** (zero 60/hr quota!), backed by executor disk cache (`VSRBLX/extensions/cache/`) and live API fallback.
-- **`[⬇ Load 10 More Extensions]` Pagination + Search & Template Filters**:
+- **`[⬇ Load 10 More Extensions]` Pagination + Search & Template Filters (`v2.3`)**:
   - Load 10 extensions per page with a **`[⬇ Load 10 More]`** button, keyword/`@author` search bar, and template filter pills.
-- **GitHub Sub-Issues Automatic Newest-SemVer Resolver (`v1.0.0` → `v1.2.0`)**:
+- **GitHub Sub-Issues Automatic Newest-SemVer Resolver (`v1.0.0` → `v1.2.0`) (`v2.3`)**:
   - Developers post extension updates as **GitHub Sub-Issues** under their parent extension issue.
   - Gatekeeper & VS-RBLX verify **same-author ownership** + **Malware Scan (`🛡 CLEAN`)** across sub-issues, and **automatically resolve & install the highest clean Semantic Version** on download (plus show `⬆ Update` badges for installed extensions).
-- **Official First-Party `Project UAI` Tab / Extension**:
-  - Add a dedicated **Project UAI** tab/official integration. Because Project UAI automatically self-updates whenever executed, clicking the **Project UAI** tab invokes its loader directly so it checks/updates itself automatically with zero manual maintenance required on VS-RBLX's side (wire user's exact Project UAI loader URL during v2.3).
-
-### [ ] Sprint v2.4 — Touch Power Workflow, Remote/Property Inspector & Local Snapshots
-- **Touch Copy/Paste Toolbar & Executor `autoexec` Multi-Script Runner**:
+- **Official First-Party `Project UAI` Tab / Extension (`v2.3`)**:
+  - Dedicated **Project UAI** tab/official integration. Because Project UAI automatically self-updates whenever executed, clicking the **Project UAI** tab invokes its loader directly so it checks/updates itself automatically with zero manual maintenance required on VS-RBLX's side (wire user's exact Project UAI loader URL during v2B).
+- **Touch Power Workflow, Remote/Property Inspector & Local Snapshots (`v2.4`)**:
   - 1-tap Copy/Paste actions for mobile executors without hardware `Ctrl+C`/`Ctrl+V`, plus 1-click **"Save to `autoexec`"** and multi-script background runner status.
-- **RemoteEvent Snippet Generator, Live Property Tweaker & Offline Snapshots (`VSRBLX/snapshots/`)**:
-  - 1-click `:FireServer(...)` / `:InvokeServer(...)` Luau call generator, live Explorer property editing (`Position`, `Size`, `Color`, `Transparency`, `Visible`, `Text`, `WalkSpeed`), `Ctrl+D` multi-occurrence selection, and offline workspace snapshots.
+  - 1-click `:FireServer(...)` / `:InvokeServer(...)` Luau call generator, live Explorer property editing (`Position`, `Size`, `Color`, `Transparency`, `Visible`, `Text`, `WalkSpeed`), `Ctrl+D` multi-occurrence selection, and offline workspace snapshots (`VSRBLX/snapshots/`).
 
 ---
 
@@ -103,3 +91,5 @@
 - **Sprint 3 — Phases 4 + 5 (PR #5 -> `3b655ea`)**: Multi-session Terminal + UNIX/Git/Roblox CLI, live `LogService.MessageOut` console + stack-jump, 3D/GUI Eyedropper (`🎯`), standalone Project Bundler (`📦`), 2-pane side-by-side Diff + Git gutter bars + Gist import/publish, interactive Settings UI + raw `.vsrblx/settings.json` sync.
 - **Combined Sprint 4 + 5 — Phases 6 + 7 (PR #6 -> `fb2323d`)**: Language-gated Live Split Preview Engine (`HTML`+`style.css`, `CSS`, `Markdown`, `JSON`/`YAML`, `SQL`, `Python`/`JS`/`TS`) + Mobile "Acode" Mode (Android/touch auto-detect prompt, `☰` drawer, `42px` tabs, Quick-Keys symbol bar, keyboard inset, `🎮 Play+Code` split-peek).
 - **Finale 6A + 6B (PR #7 -> `1df37d9` & Hotfix PR #8 -> `e172f99`)**: Deep LSP-style IntelliSense Engine (`roblox_api_db.lua`, live DataModel completion, type inference, cross-file `require` indexing, signature help, hover docs, `F12` Go-to-Definition) + Locked 5-Template Community Extension Hub (`extension_hub.lua`), Client Malware Scanner, locked `.github/ISSUE_TEMPLATE/` (`<= 200` char description fix), `extension-gatekeeper.yml` Action, and top-of-`README.md` `[!WARNING]` banner.
+- **Combined Sprint v2A — Sprints v2.1 + v2.2 (`arena/dd9f316f-vs-rblx`, build `1.0.0-836b2890e0e29e85`)**: Explicit Topbar Resize-Mode Toggle (`⤢` ON/OFF), movable floating Mobile Mode window, draggable `MinimizedPill` (`VS-RBLX ↗`), Multi-Tab Overflow Bar (`‹ ›` scroll + `▾ N` Open Tabs switcher + `+`), zero-overlap phone-safe Desktop/Compact breakpoints, viewport-clamped Modals, and Zero-Knowledge Master Vault (`crypto_vault.lua` + `vault_modal.lua`: `PBKDF2-HMAC-SHA256` + `Encrypt-then-HMAC-SHA256` in `VSRBLX/vault.enc` with first-boot opt-out).
+

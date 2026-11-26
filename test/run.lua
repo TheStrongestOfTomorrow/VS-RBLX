@@ -62,8 +62,14 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 82, "All 82 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 84, "All 84 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
+
+	-- First-boot Master Vault onboarding modal surfaces automatically and allows opting out ("Leave Unencrypted")
+	assertTrue(H.byName("VaultSetupModal") ~= nil, "First-boot Zero-Knowledge Master Vault onboarding modal appeared")
+	H.click(H.byName("VaultOptOutBtn"))
+	assertEq(api.config.get("vault.mode"), "off", "Opting out on first boot keeps PATs unencrypted")
+	assertEq(H.byName("VaultSetupModal"), nil, "Vault onboarding modal closed cleanly")
 
 	local gui = H.screen()
 	assertTrue(gui ~= nil and gui.Name == "VSRBLX_Workbench", "ScreenGui mounted inside gethui()")
@@ -165,24 +171,43 @@ check("3. GitHub Repository Clone, Pull & Atomic Commit/Push via Executor HTTP",
 	assertEq(patchedRefPayload.sha, "pushed_commit_9999999", "Branch ref fast-forwarded via HTTP PATCH")
 end)
 
-check("4. Window Dragging, Viewport Auto-Resize, & 8-Direction Player Resizing", function()
+check("4. Window Dragging, Explicit Topbar Resize Toggle (⤢ ON/OFF), Viewport Auto-Resize & 8-Direction Resizing", function()
 	local winRoot = H.byName("VSCodeWindow")
 	local titleBar = H.byName("TitleBar")
+	local resizeBtn = H.byName("ResizeModeBtn")
 	local resizeBR = H.byName("ResizeBottomRight")
 	local resizeTL = H.byName("ResizeTopLeft")
 
-	assertTrue(winRoot and titleBar and resizeBR and resizeTL, "Window & resize handles exist")
+	assertTrue(winRoot and titleBar and resizeBtn and resizeBR and resizeTL, "Window, ResizeModeBtn & resize handles exist")
+	assertEq(api.isResizeMode(), false, "Resize Mode is OFF by default so handles never hijack moving")
+	assertEq(resizeBR.Visible, false, "Resize handles hidden when Resize Mode is OFF")
 
 	api.runCommand("window.center")
 	local initX = winRoot.Position.X.Offset
 	local initY = winRoot.Position.Y.Offset
+	local initW = winRoot.Size.X.Offset
 
-	-- (A) TitleBar Dragging by Player
-	H.drag(titleBar, 380, initY + 14, 440, initY + 49)
+	-- Dragging a corner while Resize Mode is OFF does NOT resize the window!
+	H.drag(resizeBR, 800, 600, 890, 650)
+	assertEq(winRoot.Size.X.Offset, initW, "Corner drag ignored while Resize Mode is OFF")
+
+	-- (A) TitleBar Dragging by Player (works freely while Resize Mode is OFF; grab open TitleBar surface at +310px)
+	local grabX1 = initX + 310
+	H.drag(titleBar, grabX1, initY + 14, grabX1 + 60, initY + 49)
 	assertEq(winRoot.Position.X.Offset, initX + 60, "Window dragged +60px horizontally")
 	assertEq(winRoot.Position.Y.Offset, initY + 35, "Window dragged +35px vertically")
 
-	-- (B) Player Manual Resizing via Bottom-Right Corner Handle
+	-- (B) Turn ON Resize Mode via Topbar `⤢` Button -> Push/Pull Bottom-Right & Top-Left Handles!
+	H.click(resizeBtn)
+	assertEq(api.isResizeMode(), true, "Topbar ⤢ button turned Resize Mode ON")
+	assertEq(resizeBR.Visible, true, "Push/Pull corner handle visible when Resize Mode is ON")
+	assertEq(H.byName("ResizeModeBanner").Visible, true, "ResizeModeBanner pill visible")
+
+	-- TitleBar move-dragging is paused while Resize Mode is ON so push/pull never fights moving
+	local lockedMoveX = winRoot.Position.X.Offset
+	H.drag(titleBar, lockedMoveX + 310, winRoot.Position.Y.Offset + 14, lockedMoveX + 360, winRoot.Position.Y.Offset + 40)
+	assertEq(winRoot.Position.X.Offset, lockedMoveX, "TitleBar move-drag paused while Resize Mode is ON")
+
 	local preW = winRoot.Size.X.Offset
 	local preH = winRoot.Size.Y.Offset
 	H.drag(resizeBR, 800, 600, 890, 650)
@@ -193,6 +218,15 @@ check("4. Window Dragging, Viewport Auto-Resize, & 8-Direction Player Resizing",
 	local preTLW = winRoot.Size.X.Offset
 	H.drag(resizeTL, 200, 150, 240, 170)
 	assertTrue(winRoot.Size.X.Offset < preTLW, "Top-Left handle shrunk window width inward")
+
+	-- Turn OFF Resize Mode via Topbar `⤢` Button -> Locks custom size & restores TitleBar moving!
+	H.click(resizeBtn)
+	assertEq(api.isResizeMode(), false, "Topbar ⤢ button turned Resize Mode OFF")
+	assertEq(resizeBR.Visible, false, "Push/Pull handles hidden again")
+	H.advance(0.4) -- Clear double-click window before dragging TitleBar again
+	local preMove2X = winRoot.Position.X.Offset
+	H.drag(titleBar, preMove2X + 310, winRoot.Position.Y.Offset + 14, preMove2X + 280, winRoot.Position.Y.Offset + 14)
+	assertEq(winRoot.Position.X.Offset, preMove2X - 30, "TitleBar move-drag works immediately after turning ⤢ OFF")
 
 	-- (D) Auto-Resize on Viewport Change (shrinking screen to 820x520)
 	H.setViewport(820, 520)
@@ -954,7 +988,134 @@ check("10. Finale 6A + Finale 6B: Deep LSP-Style IntelliSense Engine & Locked 5-
 	assertEq(api.theme.activeId, "dark_plus", "Reverted active theme to `dark_plus` on uninstall")
 end)
 
-check("11. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+check("11. Combined Sprint v2A (v2.1 + v2.2): Movable Mobile Window, Draggable Pill, Multi-Tab Bar, Phone Breakpoints & Zero-Knowledge Master Vault", function()
+	-- =========================================================================
+	-- (A) NIST FIPS 180-4 SHA-256 Vector + Zero-Knowledge Master Vault (`vault.enc`)
+	-- =========================================================================
+	local vault = api.cryptoVault
+	local ghNet = api._env.require("net/github")
+	assertEq(vault.sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+		"Pure Lua SHA-256 matches exact NIST FIPS 180-4 test vector for 'abc'")
+	assertEq(vault.sha256Hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		"Pure Lua SHA-256 matches exact NIST FIPS 180-4 empty-string vector")
+
+	-- Migrate an existing plaintext GitHub PAT into Zero-Knowledge Master Vault!
+	ghNet.setToken("ghp_ultra_secret_pat_v2A_98765")
+	assertEq(ghNet.token(), "ghp_ultra_secret_pat_v2A_98765", "Plaintext token active prior to Vault encryption")
+
+	local okVault, vErr = vault.createMasterKey("MasterKey#2026!RBLX")
+	assertTrue(okVault == true, "Created Zero-Knowledge Master Vault: " .. tostring(vErr))
+	assertTrue(vault.isEncrypted() == true and vault.isUnlocked() == true, "Vault is encrypted & session unlocked")
+	assertTrue(H.sandbox.isfile("VSRBLX/vault.enc"), "Encrypted VSRBLX/vault.enc persisted to executor disk")
+
+	-- Verify ZERO plaintext leakage in `VSRBLX/vault.enc` AND `VSRBLX/settings.json`!
+	local rawVaultDisk = H.sandbox.readfile("VSRBLX/vault.enc")
+	local rawSettingsDisk = H.sandbox.readfile("VSRBLX/settings.json")
+	assertEq(rawVaultDisk:find("ghp_ultra_secret_pat_v2A_98765", 1, true), nil, "Ciphertext in vault.enc contains ZERO plaintext PAT bytes")
+	assertEq(rawVaultDisk:find("MasterKey#2026!RBLX", 1, true), nil, "vault.enc NEVER stores the Master Vault Key")
+	assertEq(rawSettingsDisk:find("ghp_ultra_secret_pat_v2A_98765", 1, true), nil, "settings.json scrubbed of plaintext PAT")
+	assertEq(ghNet.token(), "ghp_ultra_secret_pat_v2A_98765", "github.token() reads decrypted PAT from RAM while unlocked")
+
+	-- Lock Vault -> RAM wiped -> github.token() returns "" -> Wrong key rejected -> Right key unlocks!
+	vault.lock()
+	assertEq(vault.isUnlocked(), false, "Master Vault locked")
+	assertEq(ghNet.token(), "", "Locked Master Vault never exposes PAT without Master Key")
+	local badSetOk, badSetErr = ghNet.setToken("ghp_should_fail_while_locked")
+	assertEq(badSetOk, nil, "Writing PAT while Vault is locked is refused: " .. tostring(badSetErr))
+
+	local okWrong = vault.unlock("WrongPassphrase999")
+	assertEq(okWrong, false, "HMAC-SHA256 rejected wrong Master Vault Key")
+	assertEq(ghNet.token(), "", "PAT remains unrecoverable after wrong Master Key attempt")
+
+	-- Tamper test: flip 1 hex character in ciphertext and verify Encrypt-then-HMAC-SHA256 catches tampering!
+	local parsedEnc = json.decode(rawVaultDisk)
+	local origCt = parsedEnc.ct
+	local firstChar = origCt:sub(1, 1)
+	parsedEnc.ct = ((firstChar == "a") and "b" or "a") .. origCt:sub(2)
+	H.sandbox.writefile("VSRBLX/vault.enc", json.encode(parsedEnc))
+	local okTampered, tamperErr = vault.unlock("MasterKey#2026!RBLX")
+	assertEq(okTampered, false, "Tampered vault.enc rejected by Encrypt-then-HMAC-SHA256: " .. tostring(tamperErr))
+
+	-- Restore valid vault.enc and unlock with exact Master Vault Key!
+	H.sandbox.writefile("VSRBLX/vault.enc", rawVaultDisk)
+	local okRight, uErr = vault.unlock("MasterKey#2026!RBLX")
+	assertTrue(okRight == true, "Exact Master Vault Key unlocked vault.enc: " .. tostring(uErr))
+	assertEq(ghNet.token(), "ghp_ultra_secret_pat_v2A_98765", "Recovered exact GitHub PAT in RAM after valid unlock!")
+
+	-- Extension Hub blocks `vault.*` setting tampering
+	local badVaultPreset = api.scanExtension({
+		id = "evil-vault-downgrade",
+		name = "Evil Vault Preset",
+		version = "1.0.0",
+		author = "mallory",
+		template = "settings-preset",
+		settings = { ["vault.mode"] = "unencrypted" },
+	})
+	assertEq(badVaultPreset.ok, false, "Extension Hub blocked community preset attempting to modify vault.mode")
+
+	-- =========================================================================
+	-- (B) Movable Floating Mobile Window + Mobile `⤢` Resize + Draggable Pill
+	-- =========================================================================
+	local winRoot = H.byName("VSCodeWindow")
+	local titleBar = H.byName("TitleBar")
+	H.setViewport(844, 390)
+	api.setMobileMode(true)
+	api.runCommand("window.center")
+
+	-- Mobile Mode floats (< full viewport) so players can move & resize freely!
+	assertTrue(winRoot.Size.X.Offset < 844, "Mobile Mode window floats instead of locking full-bleed")
+	local mobStartX = winRoot.Position.X.Offset
+	local mobStartY = winRoot.Position.Y.Offset
+	H.drag(titleBar, mobStartX + 120, mobStartY + 12, mobStartX + 145, mobStartY + 22)
+	assertEq(winRoot.Position.X.Offset, mobStartX + 25, "Dragged floating Mobile Mode window horizontally")
+
+	-- Toggle `⤢` Resize Mode ON in Mobile Mode and push/pull resize!
+	H.click(H.byName("ResizeModeBtn"))
+	assertEq(api.isResizeMode(), true, "Turned Resize Mode ON in Mobile Mode")
+	local mobPreW = winRoot.Size.X.Offset
+	H.drag(H.byName("ResizeBottomRight"), 700, 320, 640, 290)
+	assertTrue(winRoot.Size.X.Offset < mobPreW, "Shrunk Mobile Mode window via Bottom-Right handle")
+	H.click(H.byName("ResizeModeBtn"))
+	assertEq(api.isResizeMode(), false, "Turned Resize Mode OFF in Mobile Mode")
+
+	-- Minimize to `MinimizedPill` -> Drag pill away from thumbstick -> Tap to restore!
+	api.app.window.minimise()
+	local pill = H.byName("MinimizedPill")
+	assertEq(pill.Visible, true, "MinimizedPill visible")
+	H.drag(pill, 40, 350, 220, 120)
+	assertEq(api.app.window.minimised, true, "Dragging MinimizedPill repositioned it without accidentally restoring")
+	assertTrue(pill.Position.X.Offset >= 150, "MinimizedPill moved to new X position")
+	H.click(pill)
+	assertEq(api.app.window.minimised, false, "Tapping MinimizedPill restored window")
+
+	api.setMobileMode(false)
+	H.setViewport(1440, 900)
+	api.runCommand("window.center")
+
+	-- =========================================================================
+	-- (C) True Multi-Tab Overflow Picker (`▾ N`) + Narrow Phone Breakpoints (`360px`)
+	-- =========================================================================
+	for i = 1, 5 do
+		api.writeFile(string.format("src/multitab_%d.luau", i), string.format("return %d\n", i))
+		api.openFile(string.format("src/multitab_%d.luau", i))
+	end
+	local allTabsBtn = H.byName("AllOpenTabsBtn")
+	assertTrue(allTabsBtn ~= nil and allTabsBtn.Text:find("▾ ", 1, true) ~= nil, "AllOpenTabsBtn (`▾ N`) mounted in TabBar")
+	assertTrue(#api.codeStore.tabs >= 5, "Multiple tabs open simultaneously without replacing each other")
+	assertEq(H.byName("ScrollTabsLeftBtn").Visible, true, "Multi-tab `‹` horizontal scroll button active")
+
+	-- Shrink viewport to Portrait Phone (`380x680`) in Desktop Mode -> Zero-overlap Compact Menu & `⋯` Overflow!
+	H.setViewport(380, 680)
+	assertEq(H.byName("MenuBar").Visible, false, "Full 5-item MenuBar collapsed on 380px portrait phone")
+	assertEq(H.byName("CompactMenuBtn").Visible, true, "Compact `≡ Menu` button shown on 380px portrait phone")
+	assertEq(H.byName("CompactMoreBtn").Visible, true, "Compact `⋯` overflow button shown on 380px portrait phone")
+	assertTrue(H.byName("PrimarySideBar").Size.X.Offset <= 180, "Desktop Sidebar clamped on 380px width so Editor stays usable")
+
+	H.setViewport(1440, 900)
+	api.runCommand("window.center")
+end)
+
+check("12. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
 	-- Re-running the same build toggles visibility and returns existing handle
 	local secondChunk = assert(H.sandbox.loadstring(
 		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',

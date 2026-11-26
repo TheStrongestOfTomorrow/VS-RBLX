@@ -14,6 +14,7 @@ return function(env)
 	local languages = env.require("runtime/languages")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local codeStore = env.require("runtime/code_store")
+	local cryptoVault = env.require("runtime/crypto_vault")
 
 	local M = {}
 
@@ -137,6 +138,7 @@ return function(env)
 						{ label = "Toggle Primary Side Bar", shortcut = "Ctrl+B", onClick = function() commands.run("view.toggleSidebar") end },
 						{ label = "Toggle Terminal Panel", shortcut = "Ctrl+J", onClick = function() commands.run("view.togglePanel") end },
 						{ label = "Split Editor Right", shortcut = "Ctrl+\\", onClick = function() commands.run("view.splitEditor") end },
+						{ label = "⤢ Toggle Resize Mode (ON/OFF)", onClick = function() commands.run("window.toggleResizeMode") end },
 						{ label = "Toggle Minimap", onClick = function() commands.run("view.toggleMinimap") end },
 						{ label = "Capture Toggle Hotkey...", onClick = function() commands.run("workbench.changeToggleKey") end },
 						{ label = "Reset Auto Window Size", onClick = function() commands.run("window.resetSize") end },
@@ -167,6 +169,7 @@ return function(env)
 					return {
 						{ label = "Clone / Load GitHub Repository...", onClick = function() commands.run("github.clone") end },
 						{ label = "Set Personal Access Token (PAT)...", onClick = function() commands.run("github.auth") end },
+						{ label = "🔐 Master Vault (Encrypt / Unlock / Lock)...", onClick = function() commands.run("vault.open") end },
 						{ separator = true },
 						{ label = "Switch / Create Branch...", onClick = function() commands.run("github.switchBranch") end },
 						{ label = "Pull Latest from GitHub", onClick = function() commands.run("github.pull") end },
@@ -199,11 +202,40 @@ return function(env)
 			menuButtons[#menuButtons + 1] = btn
 		end
 
-		-- Centered VS Code Command Center pill
+		-- Compact `≡ Menu` button for narrow Desktop windows / Phones in Desktop Mode (prevents overlap!)
+		local compactMenuBtn = P.button(bar, {
+			name = "CompactMenuBtn",
+			size = UDim2.fromOffset(48, 22),
+			pos = UDim2.fromOffset(32, 5),
+			hoverBg = theme.color.hover,
+			text = "≡ Menu",
+			bold = true,
+			textSize = 11,
+			color = theme.color.titleBarText,
+			radius = 4,
+			visible = false,
+			zIndex = 34,
+			onClick = function()
+				local topItems = {}
+				for _, mSpec in ipairs(MENUS) do
+					topItems[#topItems + 1] = {
+						label = "▸  " .. mSpec.label .. " ...",
+						onClick = function()
+							local p = bar.AbsolutePosition
+							overlay.dropdown(p.X + 32, p.Y + h + 2, mSpec.items(), 246)
+						end,
+					}
+				end
+				local p = bar.AbsolutePosition
+				overlay.dropdown(p.X + 28, p.Y + h + 2, topItems, 180)
+			end,
+		})
+
+		-- Centered VS Code Command Center pill (collapses cleanly to icon on narrow phones!)
 		local centerPill = P.button(bar, {
 			name = "CommandCenterPill",
-			size = UDim2.fromOffset(252, 22),
-			pos = UDim2.new(0.47, 0, 0.5, 0),
+			size = UDim2.fromOffset(230, 22),
+			pos = UDim2.new(0.46, 0, 0.5, 0),
 			anchor = Vector2.new(0.5, 0.5),
 			bg = theme.color.inputBg,
 			hoverBg = theme.color.hover,
@@ -228,14 +260,73 @@ return function(env)
 			zIndex = 34,
 		})
 
-		-- Right side Ghost-Coding Opacity Slider, Mobile Mode, Layout Toggles, Zen Mode & Window Controls
+		-- Right side: Vault (`🔐`), Mobile Mode (`📱`), Explicit Resize Toggle (`⤢`), Opacity, Layout & Window Controls
 		local rightCluster = P.frame(bar, {
 			name = "RightControls",
-			size = UDim2.fromOffset(328, h),
-			pos = UDim2.new(1, -328, 0, 0),
+			size = UDim2.fromOffset(392, h),
+			pos = UDim2.new(1, -392, 0, 0),
 			zIndex = 33,
 		})
 		P.list(rightCluster, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
+
+		local vaultBtn = P.button(rightCluster, {
+			name = "VaultBtn",
+			size = UDim2.fromOffset(26, 22),
+			hoverBg = theme.color.hover,
+			text = "🔐",
+			textSize = 12,
+			radius = 4,
+			order = -2,
+			zIndex = 34,
+			onClick = function()
+				commands.run("vault.open")
+			end,
+		})
+
+		local resizeActive = false
+		local resizeModeBtn = P.button(rightCluster, {
+			name = "ResizeModeBtn",
+			size = UDim2.fromOffset(30, 22),
+			hoverBg = theme.color.hover,
+			text = "⤢",
+			bold = true,
+			textSize = 13,
+			color = theme.color.titleBarText,
+			radius = 4,
+			order = -1,
+			zIndex = 34,
+			onClick = function()
+				if callbacks.onToggleResizeMode then
+					callbacks.onToggleResizeMode()
+				else
+					commands.run("window.toggleResizeMode")
+				end
+			end,
+		})
+
+		local function refreshVaultBtn()
+			if not cryptoVault.isEncrypted() then
+				vaultBtn.Text = "🔐"
+				vaultBtn.BackgroundTransparency = 1
+			elseif cryptoVault.isUnlocked() then
+				vaultBtn.Text = "🔓"
+				vaultBtn.BackgroundColor3 = theme.color.good
+				vaultBtn.BackgroundTransparency = 0.78
+			else
+				vaultBtn.Text = "🔒"
+				vaultBtn.BackgroundColor3 = theme.color.warn
+				vaultBtn.BackgroundTransparency = 0.72
+			end
+		end
+		cryptoVault.changed:connect(refreshVaultBtn)
+
+		local function refreshResizeBtn(flag)
+			resizeActive = flag == true
+			resizeModeBtn.Text = resizeActive and "⤢•" or "⤢"
+			resizeModeBtn.BackgroundColor3 = resizeActive and theme.color.accent or theme.color.titleBar
+			resizeModeBtn.BackgroundTransparency = resizeActive and 0 or 1
+			resizeModeBtn.TextColor3 = resizeActive and Color3.fromRGB(255, 255, 255) or theme.color.titleBarText
+		end
 
 		local mobileToggleBtn = P.button(rightCluster, {
 			name = "MobileModeBtn",
@@ -378,10 +469,49 @@ return function(env)
 			return b
 		end
 
-		makeIconBtn("ZenModeBtn", "zen", 2, nil, function() commands.run("workbench.toggleZenMode") end)
-		makeIconBtn("ToggleSidebarBtn", "sidebar", 3, nil, function() commands.run("view.toggleSidebar") end)
-		makeIconBtn("TogglePanelBtn", "panel", 4, nil, function() commands.run("view.togglePanel") end)
-		makeIconBtn("SplitEditorBtn", "split", 5, nil, function() commands.run("view.splitEditor") end)
+		local zenBtn = makeIconBtn("ZenModeBtn", "zen", 2, nil, function() commands.run("workbench.toggleZenMode") end)
+		local toggleSidebarBtn = makeIconBtn("ToggleSidebarBtn", "sidebar", 3, nil, function() commands.run("view.toggleSidebar") end)
+		local togglePanelBtn = makeIconBtn("TogglePanelBtn", "panel", 4, nil, function() commands.run("view.togglePanel") end)
+		local splitEditorBtn = makeIconBtn("SplitEditorBtn", "split", 5, nil, function() commands.run("view.splitEditor") end)
+
+		-- Compact `⋯` Overflow Button for narrow windows / phones so RightControls NEVER collide with Menu or Search!
+		local compactMoreBtn = P.button(rightCluster, {
+			name = "CompactMoreBtn",
+			size = UDim2.fromOffset(26, 22),
+			hoverBg = theme.color.hover,
+			text = "⋯",
+			bold = true,
+			textSize = 13,
+			color = theme.color.titleBarText,
+			radius = 4,
+			visible = false,
+			order = 5,
+			zIndex = 34,
+			onClick = function()
+				local p = rightCluster.AbsolutePosition
+				local items = {
+					{ label = "⌕ Command Palette...", shortcut = "Ctrl+Shift+P", onClick = function() commands.run("workbench.commandPalette") end },
+					{ label = string.format("◑ Window Opacity (%d%%)...", math.floor(curOpacity * 100 + 0.5)), onClick = function()
+						local presets = {
+							{ label = "100% — Solid", onClick = function() if callbacks.onSetOpacity then callbacks.onSetOpacity(1.0) end end },
+							{ label = "85% — Subtle Peek", onClick = function() if callbacks.onSetOpacity then callbacks.onSetOpacity(0.85) end end },
+							{ label = "70% — Translucent", onClick = function() if callbacks.onSetOpacity then callbacks.onSetOpacity(0.70) end end },
+							{ label = "50% — Ghost Coding", onClick = function() if callbacks.onSetOpacity then callbacks.onSetOpacity(0.50) end end },
+						}
+						overlay.dropdown(p.X, p.Y + h + 2, presets, 190)
+					end },
+					{ separator = true },
+					{ label = "Toggle Primary Sidebar", shortcut = "Ctrl+B", onClick = function() commands.run("view.toggleSidebar") end },
+					{ label = "Toggle Bottom Panel", shortcut = "Ctrl+J", onClick = function() commands.run("view.togglePanel") end },
+					{ label = "Split Editor Right", shortcut = "Ctrl+\\", onClick = function() commands.run("view.splitEditor") end },
+					{ label = "✦ Toggle Zen Mode", onClick = function() commands.run("workbench.toggleZenMode") end },
+					{ separator = true },
+					{ label = "🔐 Zero-Knowledge Master Vault...", onClick = function() commands.run("vault.open") end },
+				}
+				overlay.dropdown(p.X, p.Y + h + 2, items, 230)
+			end,
+		})
+
 		makeIconBtn("MinimizeWindowBtn", "minimize", 6, nil, function()
 			if callbacks.onMinimize then callbacks.onMinimize() end
 		end)
@@ -392,11 +522,86 @@ return function(env)
 			if callbacks.onClose then callbacks.onClose() end
 		end)
 
+		local currentBarWidth = 980
+		local isCompactWidth = false
+		local isUltraCompact = false
+
 		local function refreshTitle()
 			local doc = codeStore.active()
 			local filePart = doc and doc.title or "Welcome"
-			local zenPrefix = config.get("workbench.zenMode", false) and "✦ ZEN  •  " or "⌕  "
-			centerText.Text = string.format("%s%s — %s  (Ctrl+P)", zenPrefix, workspaceFs.activeName, filePart)
+			if isUltraCompact then
+				centerText.Text = "⌕"
+			elseif isCompactWidth then
+				centerText.Text = "⌕  " .. filePart
+			else
+				local zenPrefix = config.get("workbench.zenMode", false) and "✦ ZEN  •  " or "⌕  "
+				centerText.Text = string.format("%s%s — %s  (Ctrl+P)", zenPrefix, workspaceFs.activeName, filePart)
+			end
+		end
+
+		-- Width-Aware Zero-Overlap Reflow (`>= 880px` full, `560–879px` compact menu + overflow, `< 560px` phone-safe!)
+		local function reflowForWidth(barW)
+			currentBarWidth = tonumber(barW) or bar.AbsoluteSize.X
+			if currentBarWidth <= 0 then currentBarWidth = 980 end
+
+			isCompactWidth = (currentBarWidth < 880) or mobileMode
+			isUltraCompact = currentBarWidth < 540
+
+			drawerBtn.Visible = mobileMode
+			drawerBtn.Size = UDim2.fromOffset(34, h - 2)
+			logo.Visible = (not mobileMode) and (not isUltraCompact)
+
+			-- Left Menu Bar vs Compact `≡ Menu`
+			if mobileMode then
+				menuRow.Visible = false
+				compactMenuBtn.Visible = false
+			elseif isCompactWidth then
+				menuRow.Visible = false
+				compactMenuBtn.Visible = true
+				compactMenuBtn.Position = UDim2.fromOffset(isUltraCompact and 6 or 30, math.floor((h - 22) * 0.5))
+			else
+				menuRow.Visible = true
+				menuRow.Position = UDim2.fromOffset(34, 0)
+				menuRow.Size = UDim2.fromOffset(250, h)
+				compactMenuBtn.Visible = false
+			end
+
+			-- Secondary Right Toggles vs `⋯` Overflow
+			local showFullRight = (currentBarWidth >= 780) and (not mobileMode)
+			opacityBtn.Visible = (currentBarWidth >= 660) and (not isUltraCompact)
+			zenBtn.Visible = showFullRight
+			toggleSidebarBtn.Visible = showFullRight
+			togglePanelBtn.Visible = showFullRight
+			splitEditorBtn.Visible = showFullRight
+			compactMoreBtn.Visible = not showFullRight
+			vaultBtn.Visible = not isUltraCompact
+
+			local rightW
+			if showFullRight then
+				rightW = 386
+			elseif opacityBtn.Visible then
+				rightW = 278
+			elseif isUltraCompact then
+				rightW = 182
+			else
+				rightW = 212
+			end
+			rightCluster.Size = UDim2.fromOffset(rightW, h)
+			rightCluster.Position = UDim2.new(1, -rightW, 0, 0)
+
+			-- Left occupied width & Center Search Pill exact non-overlapping slot
+			local leftOccupied = mobileMode and 42 or (isCompactWidth and (isUltraCompact and 58 or 84) or 288)
+			local availCenter = currentBarWidth - leftOccupied - rightW - 12
+			if availCenter < 30 then
+				centerPill.Visible = false
+			else
+				centerPill.Visible = true
+				local pillW = isUltraCompact and math.min(44, availCenter) or math.min(236, availCenter)
+				local centerX = leftOccupied + math.floor((availCenter + 12) * 0.5)
+				centerPill.Size = UDim2.fromOffset(pillW, 22)
+				centerPill.Position = UDim2.new(0, centerX, 0.5, 0)
+			end
+			refreshTitle()
 		end
 
 		config.changed:connect(function(key, val)
@@ -414,6 +619,8 @@ return function(env)
 			bottomBorder.BackgroundColor3 = theme.color.border
 			centerPill.BackgroundColor3 = theme.color.inputBg
 			centerText.TextColor3 = theme.color.muted
+			compactMenuBtn.TextColor3 = theme.color.titleBarText
+			compactMoreBtn.TextColor3 = theme.color.titleBarText
 			opacityBtn.BackgroundColor3 = theme.color.inputBg
 			opacityLbl.TextColor3 = theme.color.titleBarText
 			opacityIconSlot:ClearAllChildren()
@@ -426,29 +633,32 @@ return function(env)
 				b.TextColor3 = theme.color.titleBarText
 			end
 			refreshOpacityUi(curOpacity)
+			refreshResizeBtn(resizeActive)
+			refreshVaultBtn()
 		end)
 
 		refreshOpacityUi(curOpacity)
-		refreshTitle()
+		refreshResizeBtn(false)
+		refreshVaultBtn()
+		reflowForWidth(980)
 		return {
 			root = bar,
 			drawerButton = drawerBtn,
 			mobileButton = mobileToggleBtn,
+			resizeButton = resizeModeBtn,
+			vaultButton = vaultBtn,
 			opacityButton = opacityBtn,
 			refresh = refreshTitle,
 			refreshOpacity = refreshOpacityUi,
+			setResizeMode = refreshResizeBtn,
+			reflow = reflowForWidth,
 			setMobileMode = function(flag)
 				mobileMode = flag == true
 				h = mobileMode and 38 or theme.sizes.titleBar
 				bar.Size = UDim2.new(1, 0, 0, h)
-				drawerBtn.Visible = mobileMode
-				drawerBtn.Size = UDim2.fromOffset(34, h - 2)
-				logo.Visible = not mobileMode
-				menuRow.Position = UDim2.fromOffset(mobileMode and 40 or 34, 0)
-				menuRow.Size = UDim2.fromOffset(250, h)
-				menuRow.Visible = not mobileMode
 				mobileToggleBtn.BackgroundColor3 = mobileMode and theme.color.accent or theme.color.titleBar
 				mobileToggleBtn.BackgroundTransparency = mobileMode and 0 or 1
+				reflowForWidth(currentBarWidth)
 			end,
 		}
 	end

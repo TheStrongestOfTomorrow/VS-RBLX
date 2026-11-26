@@ -54,6 +54,10 @@ return function(env)
 			activeBranch = "main",
 			autoSyncOnPush = true,
 		},
+		vault = {
+			mode = "unset",
+			promptedOnce = false,
+		},
 		git = {
 			sideBySideDiff = true,
 			gutterDecorations = true,

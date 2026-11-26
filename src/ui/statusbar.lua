@@ -237,10 +237,34 @@ return function(env)
 		end)
 
 		refresh()
+
+		local function reflowStatus(barW)
+			local w = tonumber(barW) or bar.AbsoluteSize.X
+			if w <= 0 then w = 980 end
+			local ultra = w < 480
+			local medium = w < 720
+			todosBtn.Visible = not medium
+			syncBtn.Visible = not medium
+			pickerBtn.Visible = not ultra
+			utfLbl.Visible = not medium
+			indentBtn.Visible = not ultra
+			hostPill.Visible = not (w < 380)
+			if ultra then
+				leftRow.Size = UDim2.new(0.52, 0, 1, 0)
+				rightRow.Size = UDim2.new(0.48, -6, 1, 0)
+				rightRow.Position = UDim2.new(0.52, 0, 0, 0)
+			else
+				leftRow.Size = UDim2.new(0.60, 0, 1, 0)
+				rightRow.Size = UDim2.new(0.40, -8, 1, 0)
+				rightRow.Position = UDim2.new(0.60, 0, 0, 0)
+			end
+		end
+
 		return {
 			root = bar,
 			branchButton = branchBtn,
 			refresh = refresh,
+			reflow = reflowStatus,
 		}
 	end
 

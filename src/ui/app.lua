@@ -26,10 +26,12 @@ return function(env)
 	local extensionsPanel = env.require("ui/panels/extensions")
 	local settingsPanel = env.require("ui/panels/settings")
 	local githubConnect = env.require("ui/panels/github_connect")
+	local vaultModal = env.require("ui/panels/vault_modal")
 
 	local util = env.require("runtime/util")
 	local dispose = env.require("runtime/dispose")
 	local config = env.require("runtime/config")
+	local cryptoVault = env.require("runtime/crypto_vault")
 	local bootProgress = env.require("runtime/boot_progress")
 	local workspaceFs = env.require("runtime/workspace_fs")
 	local languages = env.require("runtime/languages")
@@ -56,6 +58,7 @@ return function(env)
 		if splash then pcall(splash.step, "Loading workspace configuration...", 0.25) end
 
 		config.load()
+		cryptoVault.init()
 		theme.apply()
 
 		bootProgress.update("fs", "Mounting local disk workspace (writefile / readfile)...")
@@ -130,18 +133,32 @@ return function(env)
 
 		local reflowWorkbench
 
-		-- TitleBar (bound to window drag + opacity scrub + mobile drawer + maximize/minimize/close controls)
+		-- TitleBar (bound to window drag + explicit resize toggle + opacity scrub + mobile drawer + controls)
 		local titleBar = titlebarMod.new(win.body, {
 			onMinimize = function() win.minimise() end,
 			onMaximize = function() win.toggleMaximise() end,
 			onClose = function() win.hide() end,
 			onSetOpacity = function(alpha) win.setOpacity(alpha) end,
+			onToggleResizeMode = function()
+				local on = win.toggleResizeMode()
+				overlay.toast(
+					on and "⤢ Resize Mode ON — Push/Pull any edge or corner (Tap ⤢ again to lock & move)"
+						or "⤢ Resize Mode OFF — Window locked, drag Topbar to move freely",
+					on and "info" or "good",
+					2.4
+				)
+			end,
 			onToggleDrawer = function()
 				drawerOpen = not drawerOpen
 				if reflowWorkbench then reflowWorkbench() end
 			end,
 		})
 		win.bindDragBar(titleBar.root)
+		win.resizeModeChanged:connect(function(flag)
+			if titleBar.setResizeMode then
+				titleBar.setResizeMode(flag)
+			end
+		end)
 
 		-- StatusBar
 		local statusBar = statusbarMod.new(win.body)
@@ -349,10 +366,14 @@ return function(env)
 		local drawerPillBtns = {}
 
 		reflowWorkbench = function()
+			local winW = math.max(280, win.root.Size.X.Offset)
+			local winH = math.max(200, win.root.Size.Y.Offset)
 			local effTitleH = mobileMode and 38 or TITLE_H
 			local effTabH = mobileMode and 42 or TAB_H
 			local showStatus = (not zenMode) and (not mobileMode)
 			statusBar.root.Visible = showStatus
+			if titleBar.reflow then titleBar.reflow(winW) end
+			if statusBar.reflow then statusBar.reflow(winW) end
 			workbenchBody.Position = UDim2.fromOffset(0, effTitleH)
 			workbenchBody.Size = UDim2.new(1, 0, 1, -(effTitleH + (showStatus and STATUS_H or 0)))
 
@@ -368,10 +389,11 @@ return function(env)
 				actBar.root.Visible = showAct
 			end
 			local effActW = showAct and ACT_W or 0
+			local mainAvailW = winW
 
 			if mobileMode then
 				-- Acode Slide-Over Drawer mode: overlays on top of the editor when `drawerOpen == true`
-				local drawerW = math.min(290, math.max(220, workbenchBody.AbsoluteSize.X - 36))
+				local drawerW = math.min(290, math.max(200, winW - 36))
 				local showDrawer = (not zenMode) and drawerOpen
 				drawerBackdrop.Visible = showDrawer
 				sideBarFrame.Visible = showDrawer
@@ -385,6 +407,7 @@ return function(env)
 
 				mainArea.Position = UDim2.fromOffset(0, 0)
 				mainArea.Size = UDim2.fromScale(1, 1)
+				mainAvailW = winW
 			else
 				drawerBackdrop.Visible = false
 				drawerNav.Visible = false
@@ -392,17 +415,22 @@ return function(env)
 				viewletHost.Position = UDim2.fromOffset(0, 0)
 				viewletHost.Size = UDim2.fromScale(1, 1)
 
+				-- Clamp Desktop Sidebar width on narrow screens (< 580px) so Editor always keeps breathing room!
+				local clampedSideW = (winW < 580)
+					and math.min(sideBarWidth, math.max(150, math.floor((winW - effActW) * 0.42)))
+					or sideBarWidth
 				local showSide = (not zenMode) and sideBarVisible
-				local effSideW = showSide and sideBarWidth or 0
+				local effSideW = showSide and clampedSideW or 0
 				sideBarFrame.Visible = showSide
 				sideBarFrame.Position = UDim2.fromOffset(effActW, 0)
-				sideBarFrame.Size = UDim2.new(0, sideBarWidth, 1, 0)
+				sideBarFrame.Size = UDim2.new(0, clampedSideW, 1, 0)
 				sideSash.Visible = showSide
-				sideSash.Position = UDim2.fromOffset(effActW + sideBarWidth - 2, 0)
+				sideSash.Position = UDim2.fromOffset(effActW + clampedSideW - 2, 0)
 
 				local leftOffset = effActW + effSideW
 				mainArea.Position = UDim2.fromOffset(leftOffset, 0)
 				mainArea.Size = UDim2.new(1, -leftOffset, 1, 0)
+				mainAvailW = math.max(180, winW - leftOffset)
 			end
 
 			local showQuickBar = mobileMode and (config.get("mobile.quickKeys", true) ~= false)
@@ -410,7 +438,8 @@ return function(env)
 			mobileQuickBar.root.Visible = showQuickBar
 
 			local showPanel = (not zenMode) and panelVisible
-			local effPanelH = showPanel and panelHeight or 0
+			local clampedPanelH = math.min(panelHeight, math.max(90, math.floor((winH - effTitleH) * 0.44)))
+			local effPanelH = showPanel and clampedPanelH or 0
 			panelHolder.Visible = showPanel
 			panelHolder.Size = UDim2.new(1, 0, 0, effPanelH)
 			panelHolder.Position = UDim2.new(0, 0, 1, -effPanelH)
@@ -437,6 +466,7 @@ return function(env)
 				previewPane.root.Size = UDim2.new(1 - splitRatio, 0, 1, 0)
 				editorSplitSash.Visible = true
 				editorSplitSash.Position = UDim2.new(splitRatio, -2, 0, 0)
+				if primaryTabs.reflow then primaryTabs.reflow(math.floor(mainAvailW * splitRatio)) end
 			elseif codeStore.splitOpen then
 				previewPane.root.Visible = false
 				primaryGroup.Size = UDim2.new(splitRatio, 0, 1, 0)
@@ -445,11 +475,14 @@ return function(env)
 				secondaryGroup.Size = UDim2.new(1 - splitRatio, 0, 1, 0)
 				editorSplitSash.Visible = true
 				editorSplitSash.Position = UDim2.new(splitRatio, -2, 0, 0)
+				if primaryTabs.reflow then primaryTabs.reflow(math.floor(mainAvailW * splitRatio)) end
+				if secondaryTabs.reflow then secondaryTabs.reflow(math.floor(mainAvailW * (1 - splitRatio))) end
 			else
 				previewPane.root.Visible = false
 				primaryGroup.Size = UDim2.fromScale(1, 1)
 				secondaryGroup.Visible = false
 				editorSplitSash.Visible = false
+				if primaryTabs.reflow then primaryTabs.reflow(mainAvailW) end
 			end
 		end
 
@@ -644,6 +677,36 @@ return function(env)
 			reg("window.center", "Reset Window Auto-Size & Center on Screen", "Window", nil, function()
 				win.resetAutoSize()
 			end, { "window.resetSize" })
+
+			reg("window.toggleResizeMode", "Toggle Resize Mode (⤢ Push/Pull Edges ON/OFF)", "Window", nil, function()
+				local on = win.toggleResizeMode()
+				overlay.toast(
+					on and "⤢ Resize Mode ON — Pull/push any edge or corner" or "⤢ Resize Mode OFF — Drag Topbar to move freely",
+					on and "info" or "good",
+					2.2
+				)
+				return on
+			end, { "window.resizeMode" })
+
+			reg("window.setResizeMode", "Set Window Resize Mode Explicitly", "Window", nil, function(flag)
+				return win.setResizeMode(flag == true)
+			end)
+
+			reg("vault.open", "Zero-Knowledge Master Vault: Setup / Unlock / Manage...", "Security", nil, function()
+				return vaultModal.openVaultModal()
+			end, { "vault.setup", "vault.unlock" })
+
+			reg("vault.lock", "Zero-Knowledge Master Vault: Lock Session Now", "Security", nil, function()
+				cryptoVault.lock()
+				overlay.toast("🔒 Master Vault locked (decrypted PAT wiped from RAM)", "good", 2.2)
+				return true
+			end)
+
+			reg("vault.reset", "Zero-Knowledge Master Vault: Wipe & Disable Encryption", "Security", nil, function()
+				cryptoVault.resetVault()
+				overlay.toast("Wiped VSRBLX/vault.enc & disabled Vault encryption", "warn", 2.5)
+				return true
+			end)
 
 			reg("workbench.toggleZenMode", "Toggle Zen Mode (Distraction-Free)", "View", "Ctrl+Shift+Z", function()
 				local enabled = setZenMode(not zenMode)
@@ -1292,7 +1355,16 @@ return function(env)
 			reflowWorkbench()
 		end
 
-		-- Auto-detect Android / touch devices and offer to switch to Acode Mobile Mode!
+		-- Auto-detect Android / touch devices and offer to switch to Acode Mobile Mode,
+		-- followed by First-Boot Zero-Knowledge Master Vault Onboarding (`[Create Vault Key]` vs `[Leave Unencrypted]`)!
+		local function maybeOfferVaultOnboarding()
+			if opts.skipFirstBootPrompts == true then return end
+			if cryptoVault.shouldPromptFirstBoot() then
+				config.set("vault.promptedOnce", true, { immediate = true })
+				vaultModal.openSetupModal()
+			end
+		end
+
 		local modeSetting = tostring(config.get("mobile.mode", "auto"))
 		if modeSetting == "auto" and responsive.isTouchDevice() and config.get("mobile.promptedOnce", false) ~= true then
 			overlay.confirm({
@@ -1304,12 +1376,16 @@ return function(env)
 				onPrimary = function()
 					config.set("mobile.promptedOnce", true, { quiet = true })
 					setMobileMode(true)
+					maybeOfferVaultOnboarding()
 				end,
 				onSecondary = function()
 					config.set("mobile.promptedOnce", true, { quiet = true })
 					config.set("mobile.mode", "off", { immediate = true })
+					maybeOfferVaultOnboarding()
 				end,
 			})
+		else
+			maybeOfferVaultOnboarding()
 		end
 
 		theme.changed:connect(function()

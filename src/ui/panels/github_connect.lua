@@ -5,6 +5,8 @@ return function(env)
 	local overlay = env.require("ui/overlay")
 	local config = env.require("runtime/config")
 	local caps = env.require("runtime/caps")
+	local cryptoVault = env.require("runtime/crypto_vault")
+	local commands = env.require("runtime/command_catalog")
 	local github = env.require("net/github")
 	local githubSync = env.require("tools/github_sync")
 
@@ -71,19 +73,36 @@ return function(env)
 		})
 
 		P.label(card, {
-			size = UDim2.new(1, 0, 0, 18),
+			size = UDim2.new(1, -110, 0, 18),
 			pos = UDim2.fromOffset(0, 108),
-			text = "Personal Access Token (optional for public clone; required for private repos & push)",
+			text = cryptoVault.isEncrypted()
+				and (cryptoVault.isUnlocked() and "🔓 Vault Encrypted PAT (Session Unlocked)" or "🔒 Vault Locked — Unlock to use saved PAT")
+				or "Personal Access Token (optional for public; encrypt via 🔐 Vault)",
 			textSize = 11,
-			color = theme.color.sideBarText,
+			color = cryptoVault.isEncrypted() and (cryptoVault.isUnlocked() and theme.color.good or theme.color.warn) or theme.color.sideBarText,
+			truncate = true,
 			zIndex = 232,
+		})
+		P.button(card, {
+			name = "GitHubOpenVaultBtn",
+			size = UDim2.fromOffset(102, 18),
+			pos = UDim2.new(1, -102, 0, 108),
+			bg = theme.color.inputBg,
+			hoverBg = theme.color.accent,
+			text = cryptoVault.isEncrypted() and (cryptoVault.isUnlocked() and "🔓 Vault Settings" or "🔒 Unlock Vault") or "🔐 Encrypt PAT",
+			textSize = 10,
+			radius = 4,
+			zIndex = 232,
+			onClick = function()
+				commands.run("vault.open")
+			end,
 		})
 		local _, patBox = P.input(card, {
 			name = "PatInput",
 			size = UDim2.new(1, -188, 0, 28),
 			pos = UDim2.fromOffset(0, 128),
 			mono = true,
-			value = config.get("github.token", ""),
+			value = github.token(),
 			placeholder = "ghp_xxxxxxxxxxxxxxxxxxxx",
 			zIndex = 232,
 		})
@@ -160,7 +179,7 @@ return function(env)
 				feedbackLbl.Text = "Enter owner/repo first."
 				return
 			end
-			if patBox.Text ~= config.get("github.token", "") then
+			if patBox.Text ~= github.token() then
 				github.setToken(patBox.Text)
 			end
 			feedbackLbl.Text = "Cloning " .. spec .. " via Executor HTTP..."
