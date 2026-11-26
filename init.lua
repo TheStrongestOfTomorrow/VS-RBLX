@@ -255,9 +255,11 @@ local function start()
 		options.splash = nil
 	else
 		local config = env.require("runtime/config")
+		local cryptoVault = env.require("runtime/crypto_vault")
 		local workspaceFs = env.require("runtime/workspace_fs")
 		local gitState = env.require("runtime/git_state")
 		config.load()
+		cryptoVault.init()
 		workspaceFs.init()
 		gitState.loadMeta()
 	end

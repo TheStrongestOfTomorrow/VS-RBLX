@@ -62,8 +62,14 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 82, "All 82 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 91, "All 91 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
+
+	-- First-boot Master Vault onboarding modal surfaces automatically and allows opting out ("Leave Unencrypted")
+	assertTrue(H.byName("VaultSetupModal") ~= nil, "First-boot Zero-Knowledge Master Vault onboarding modal appeared")
+	H.click(H.byName("VaultOptOutBtn"))
+	assertEq(api.config.get("vault.mode"), "off", "Opting out on first boot keeps PATs unencrypted")
+	assertEq(H.byName("VaultSetupModal"), nil, "Vault onboarding modal closed cleanly")
 
 	local gui = H.screen()
 	assertTrue(gui ~= nil and gui.Name == "VSRBLX_Workbench", "ScreenGui mounted inside gethui()")
@@ -165,24 +171,43 @@ check("3. GitHub Repository Clone, Pull & Atomic Commit/Push via Executor HTTP",
 	assertEq(patchedRefPayload.sha, "pushed_commit_9999999", "Branch ref fast-forwarded via HTTP PATCH")
 end)
 
-check("4. Window Dragging, Viewport Auto-Resize, & 8-Direction Player Resizing", function()
+check("4. Window Dragging, Explicit Topbar Resize Toggle (⤢ ON/OFF), Viewport Auto-Resize & 8-Direction Resizing", function()
 	local winRoot = H.byName("VSCodeWindow")
 	local titleBar = H.byName("TitleBar")
+	local resizeBtn = H.byName("ResizeModeBtn")
 	local resizeBR = H.byName("ResizeBottomRight")
 	local resizeTL = H.byName("ResizeTopLeft")
 
-	assertTrue(winRoot and titleBar and resizeBR and resizeTL, "Window & resize handles exist")
+	assertTrue(winRoot and titleBar and resizeBtn and resizeBR and resizeTL, "Window, ResizeModeBtn & resize handles exist")
+	assertEq(api.isResizeMode(), false, "Resize Mode is OFF by default so handles never hijack moving")
+	assertEq(resizeBR.Visible, false, "Resize handles hidden when Resize Mode is OFF")
 
 	api.runCommand("window.center")
 	local initX = winRoot.Position.X.Offset
 	local initY = winRoot.Position.Y.Offset
+	local initW = winRoot.Size.X.Offset
 
-	-- (A) TitleBar Dragging by Player
-	H.drag(titleBar, 380, initY + 14, 440, initY + 49)
+	-- Dragging a corner while Resize Mode is OFF does NOT resize the window!
+	H.drag(resizeBR, 800, 600, 890, 650)
+	assertEq(winRoot.Size.X.Offset, initW, "Corner drag ignored while Resize Mode is OFF")
+
+	-- (A) TitleBar Dragging by Player (works freely while Resize Mode is OFF; grab open TitleBar surface at +310px)
+	local grabX1 = initX + 310
+	H.drag(titleBar, grabX1, initY + 14, grabX1 + 60, initY + 49)
 	assertEq(winRoot.Position.X.Offset, initX + 60, "Window dragged +60px horizontally")
 	assertEq(winRoot.Position.Y.Offset, initY + 35, "Window dragged +35px vertically")
 
-	-- (B) Player Manual Resizing via Bottom-Right Corner Handle
+	-- (B) Turn ON Resize Mode via Topbar `⤢` Button -> Push/Pull Bottom-Right & Top-Left Handles!
+	H.click(resizeBtn)
+	assertEq(api.isResizeMode(), true, "Topbar ⤢ button turned Resize Mode ON")
+	assertEq(resizeBR.Visible, true, "Push/Pull corner handle visible when Resize Mode is ON")
+	assertEq(H.byName("ResizeModeBanner").Visible, true, "ResizeModeBanner pill visible")
+
+	-- TitleBar move-dragging is paused while Resize Mode is ON so push/pull never fights moving
+	local lockedMoveX = winRoot.Position.X.Offset
+	H.drag(titleBar, lockedMoveX + 310, winRoot.Position.Y.Offset + 14, lockedMoveX + 360, winRoot.Position.Y.Offset + 40)
+	assertEq(winRoot.Position.X.Offset, lockedMoveX, "TitleBar move-drag paused while Resize Mode is ON")
+
 	local preW = winRoot.Size.X.Offset
 	local preH = winRoot.Size.Y.Offset
 	H.drag(resizeBR, 800, 600, 890, 650)
@@ -193,6 +218,15 @@ check("4. Window Dragging, Viewport Auto-Resize, & 8-Direction Player Resizing",
 	local preTLW = winRoot.Size.X.Offset
 	H.drag(resizeTL, 200, 150, 240, 170)
 	assertTrue(winRoot.Size.X.Offset < preTLW, "Top-Left handle shrunk window width inward")
+
+	-- Turn OFF Resize Mode via Topbar `⤢` Button -> Locks custom size & restores TitleBar moving!
+	H.click(resizeBtn)
+	assertEq(api.isResizeMode(), false, "Topbar ⤢ button turned Resize Mode OFF")
+	assertEq(resizeBR.Visible, false, "Push/Pull handles hidden again")
+	H.advance(0.4) -- Clear double-click window before dragging TitleBar again
+	local preMove2X = winRoot.Position.X.Offset
+	H.drag(titleBar, preMove2X + 310, winRoot.Position.Y.Offset + 14, preMove2X + 280, winRoot.Position.Y.Offset + 14)
+	assertEq(winRoot.Position.X.Offset, preMove2X - 30, "TitleBar move-drag works immediately after turning ⤢ OFF")
 
 	-- (D) Auto-Resize on Viewport Change (shrinking screen to 820x520)
 	H.setViewport(820, 520)
@@ -954,7 +988,428 @@ check("10. Finale 6A + Finale 6B: Deep LSP-Style IntelliSense Engine & Locked 5-
 	assertEq(api.theme.activeId, "dark_plus", "Reverted active theme to `dark_plus` on uninstall")
 end)
 
-check("11. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+check("11. Combined Sprint v2A (v2.1 + v2.2): Movable Mobile Window, Draggable Pill, Multi-Tab Bar, Phone Breakpoints & Zero-Knowledge Master Vault", function()
+	-- =========================================================================
+	-- (A) NIST FIPS 180-4 SHA-256 Vector + Zero-Knowledge Master Vault (`vault.enc`)
+	-- =========================================================================
+	local vault = api.cryptoVault
+	local ghNet = api._env.require("net/github")
+	assertEq(vault.sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+		"Pure Lua SHA-256 matches exact NIST FIPS 180-4 test vector for 'abc'")
+	assertEq(vault.sha256Hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		"Pure Lua SHA-256 matches exact NIST FIPS 180-4 empty-string vector")
+
+	-- Migrate an existing plaintext GitHub PAT into Zero-Knowledge Master Vault!
+	ghNet.setToken("ghp_ultra_secret_pat_v2A_98765")
+	assertEq(ghNet.token(), "ghp_ultra_secret_pat_v2A_98765", "Plaintext token active prior to Vault encryption")
+
+	local okVault, vErr = vault.createMasterKey("MasterKey#2026!RBLX")
+	assertTrue(okVault == true, "Created Zero-Knowledge Master Vault: " .. tostring(vErr))
+	assertTrue(vault.isEncrypted() == true and vault.isUnlocked() == true, "Vault is encrypted & session unlocked")
+	assertTrue(H.sandbox.isfile("VSRBLX/vault.enc"), "Encrypted VSRBLX/vault.enc persisted to executor disk")
+
+	-- Verify ZERO plaintext leakage in `VSRBLX/vault.enc` AND `VSRBLX/settings.json`!
+	local rawVaultDisk = H.sandbox.readfile("VSRBLX/vault.enc")
+	local rawSettingsDisk = H.sandbox.readfile("VSRBLX/settings.json")
+	assertEq(rawVaultDisk:find("ghp_ultra_secret_pat_v2A_98765", 1, true), nil, "Ciphertext in vault.enc contains ZERO plaintext PAT bytes")
+	assertEq(rawVaultDisk:find("MasterKey#2026!RBLX", 1, true), nil, "vault.enc NEVER stores the Master Vault Key")
+	assertEq(rawSettingsDisk:find("ghp_ultra_secret_pat_v2A_98765", 1, true), nil, "settings.json scrubbed of plaintext PAT")
+	assertEq(ghNet.token(), "ghp_ultra_secret_pat_v2A_98765", "github.token() reads decrypted PAT from RAM while unlocked")
+
+	-- Lock Vault -> RAM wiped -> github.token() returns "" -> Wrong key rejected -> Right key unlocks!
+	vault.lock()
+	assertEq(vault.isUnlocked(), false, "Master Vault locked")
+	assertEq(ghNet.token(), "", "Locked Master Vault never exposes PAT without Master Key")
+	local badSetOk, badSetErr = ghNet.setToken("ghp_should_fail_while_locked")
+	assertEq(badSetOk, nil, "Writing PAT while Vault is locked is refused: " .. tostring(badSetErr))
+
+	local okWrong = vault.unlock("WrongPassphrase999")
+	assertEq(okWrong, false, "HMAC-SHA256 rejected wrong Master Vault Key")
+	assertEq(ghNet.token(), "", "PAT remains unrecoverable after wrong Master Key attempt")
+
+	-- Tamper test: flip 1 hex character in ciphertext and verify Encrypt-then-HMAC-SHA256 catches tampering!
+	local parsedEnc = json.decode(rawVaultDisk)
+	local origCt = parsedEnc.ct
+	local firstChar = origCt:sub(1, 1)
+	parsedEnc.ct = ((firstChar == "a") and "b" or "a") .. origCt:sub(2)
+	H.sandbox.writefile("VSRBLX/vault.enc", json.encode(parsedEnc))
+	local okTampered, tamperErr = vault.unlock("MasterKey#2026!RBLX")
+	assertEq(okTampered, false, "Tampered vault.enc rejected by Encrypt-then-HMAC-SHA256: " .. tostring(tamperErr))
+
+	-- Restore valid vault.enc and unlock with exact Master Vault Key!
+	H.sandbox.writefile("VSRBLX/vault.enc", rawVaultDisk)
+	local okRight, uErr = vault.unlock("MasterKey#2026!RBLX")
+	assertTrue(okRight == true, "Exact Master Vault Key unlocked vault.enc: " .. tostring(uErr))
+	assertEq(ghNet.token(), "ghp_ultra_secret_pat_v2A_98765", "Recovered exact GitHub PAT in RAM after valid unlock!")
+
+	-- Extension Hub blocks `vault.*` setting tampering
+	local badVaultPreset = api.scanExtension({
+		id = "evil-vault-downgrade",
+		name = "Evil Vault Preset",
+		version = "1.0.0",
+		author = "mallory",
+		template = "settings-preset",
+		settings = { ["vault.mode"] = "unencrypted" },
+	})
+	assertEq(badVaultPreset.ok, false, "Extension Hub blocked community preset attempting to modify vault.mode")
+
+	-- =========================================================================
+	-- (B) Movable Floating Mobile Window + Mobile `⤢` Resize + Draggable Pill
+	-- =========================================================================
+	local winRoot = H.byName("VSCodeWindow")
+	local titleBar = H.byName("TitleBar")
+	H.setViewport(844, 390)
+	api.setMobileMode(true)
+	api.runCommand("window.center")
+
+	-- Mobile Mode floats (< full viewport) so players can move & resize freely!
+	assertTrue(winRoot.Size.X.Offset < 844, "Mobile Mode window floats instead of locking full-bleed")
+	local mobStartX = winRoot.Position.X.Offset
+	local mobStartY = winRoot.Position.Y.Offset
+	H.drag(titleBar, mobStartX + 120, mobStartY + 12, mobStartX + 145, mobStartY + 22)
+	assertEq(winRoot.Position.X.Offset, mobStartX + 25, "Dragged floating Mobile Mode window horizontally")
+
+	-- Toggle `⤢` Resize Mode ON in Mobile Mode and push/pull resize!
+	H.click(H.byName("ResizeModeBtn"))
+	assertEq(api.isResizeMode(), true, "Turned Resize Mode ON in Mobile Mode")
+	local mobPreW = winRoot.Size.X.Offset
+	H.drag(H.byName("ResizeBottomRight"), 700, 320, 640, 290)
+	assertTrue(winRoot.Size.X.Offset < mobPreW, "Shrunk Mobile Mode window via Bottom-Right handle")
+	H.click(H.byName("ResizeModeBtn"))
+	assertEq(api.isResizeMode(), false, "Turned Resize Mode OFF in Mobile Mode")
+
+	-- Minimize to `MinimizedPill` -> Drag pill away from thumbstick -> Tap to restore!
+	api.app.window.minimise()
+	local pill = H.byName("MinimizedPill")
+	assertEq(pill.Visible, true, "MinimizedPill visible")
+	H.drag(pill, 40, 350, 220, 120)
+	assertEq(api.app.window.minimised, true, "Dragging MinimizedPill repositioned it without accidentally restoring")
+	assertTrue(pill.Position.X.Offset >= 150, "MinimizedPill moved to new X position")
+	H.click(pill)
+	assertEq(api.app.window.minimised, false, "Tapping MinimizedPill restored window")
+
+	api.setMobileMode(false)
+	H.setViewport(1440, 900)
+	api.runCommand("window.center")
+
+	-- =========================================================================
+	-- (C) True Multi-Tab Overflow Picker (`▾ N`) + Narrow Phone Breakpoints (`360px`)
+	-- =========================================================================
+	for i = 1, 5 do
+		api.writeFile(string.format("src/multitab_%d.luau", i), string.format("return %d\n", i))
+		api.openFile(string.format("src/multitab_%d.luau", i))
+	end
+	local allTabsBtn = H.byName("AllOpenTabsBtn")
+	assertTrue(allTabsBtn ~= nil and allTabsBtn.Text:find("▾ ", 1, true) ~= nil, "AllOpenTabsBtn (`▾ N`) mounted in TabBar")
+	assertTrue(#api.codeStore.tabs >= 5, "Multiple tabs open simultaneously without replacing each other")
+	assertEq(H.byName("ScrollTabsLeftBtn").Visible, true, "Multi-tab `‹` horizontal scroll button active")
+
+	-- Shrink viewport to Portrait Phone (`380x680`) in Desktop Mode -> Zero-overlap Compact Menu & `⋯` Overflow!
+	H.setViewport(380, 680)
+	assertEq(H.byName("MenuBar").Visible, false, "Full 5-item MenuBar collapsed on 380px portrait phone")
+	assertEq(H.byName("CompactMenuBtn").Visible, true, "Compact `≡ Menu` button shown on 380px portrait phone")
+	assertEq(H.byName("CompactMoreBtn").Visible, true, "Compact `⋯` overflow button shown on 380px portrait phone")
+	assertTrue(H.byName("PrimarySideBar").Size.X.Offset <= 180, "Desktop Sidebar clamped on 380px width so Editor stays usable")
+
+	H.setViewport(1440, 900)
+	api.runCommand("window.center")
+end)
+
+check("12. Combined Sprint v2B — VS Code Integrated AI Editor, Static CDN 10/Page Hub, Sub-Issue SemVer & Power Tools", function()
+	-- (A) VS Code Secondary Right-Side AI Sidebar (`AIChatSidebar`) + Attribution + Zero-Key Inline `Ctrl+I`
+	local aiBtn = H.byName("AiChatBtn")
+	assertTrue(aiBtn ~= nil, "`✦ AI` Titlebar button exists")
+	H.click(aiBtn)
+	local aiSidebar = H.byName("AIChatSidebar")
+	assertTrue(aiSidebar ~= nil and aiSidebar.Visible == true, "Clicking `✦ AI` opened VS Code Secondary Right-Side AI Sidebar")
+	local attrLbl = H.byName("AiAttributionLabel")
+	assertTrue(attrLbl ~= nil and attrLbl.Text:find("Project UAI", 1, true) ~= nil, "AI Sidebar explicitly credits Project UAI (MIT © CarlDV / Project-Ptolemy)")
+
+	-- Default Out-of-the-Box Provider is Kilo Code (`kilo` · `kilo-auto/free`) with ZERO API key required!
+	assertEq(api.aiProviders.activeProviderId(), "kilo", "Default out-of-the-box AI provider is `kilo` (Kilo Code Free Gateway)")
+	assertEq(api.aiProviders.activeModel(), "kilo-auto/free", "Default Kilo Code model is `kilo-auto/free` auto-router")
+	assertEq(api.aiProviders.getProvider("kilo").requiresKey, false, "Kilo Code `:free` gateway requires NO API key")
+
+	local kiloNoAuthVerified = false
+	H.onHttp(function(req, url)
+		if url == "https://api.kilo.ai/api/gateway/chat/completions" then
+			local hdrs = req and (req.Headers or req.headers) or {}
+			assertEq(hdrs["Authorization"], nil, "Anonymous Kilo Code `:free` request sends NO Authorization header when unkeyed")
+			kiloNoAuthVerified = true
+			return {
+				StatusCode = 200,
+				Body = table.concat({
+					'data: {"choices":[{"delta":{"content":"```luau\\nlocal freeKilo = true\\n```"},"finish_reason":"stop"}]}\n\n',
+					'data: [DONE]\n\n',
+				}),
+			}
+		elseif url == "https://api.kilo.ai/api/gateway/models" then
+			return {
+				StatusCode = 200,
+				Body = json.encode({
+					data = {
+						{ id = "kilo-auto/free", pricing = { prompt = "0", completion = "0" } },
+						{ id = "x-ai/grok-code-fast-1:free", pricing = { prompt = "0", completion = "0" } },
+						{ id = "anthropic/claude-paid-only", pricing = { prompt = "0.000003", completion = "0.000015" } },
+					},
+				}),
+			}
+		end
+	end)
+
+	local kiloReply = api.aiAgent.send("Generate a freeKilo flag")
+	assertTrue(kiloNoAuthVerified and kiloReply ~= nil and kiloReply.codeBlock:find("freeKilo", 1, true) ~= nil, "Kilo Code `kilo-auto/free` answered over SSE with zero API key!")
+
+	local syncedFreeModels = api.aiProviders.refreshKiloFreeModels()
+	assertTrue(type(syncedFreeModels) == "table" and #syncedFreeModels == 2, "Live Kilo `:free` model sync kept 2 free models and filtered out paid model")
+	assertEq(syncedFreeModels[2], "x-ai/grok-code-fast-1:free", "Live Kilo model sync discovered `x-ai/grok-code-fast-1:free`")
+
+	-- Inline `Ctrl+I` Floating Bar with Built-In Offline Smart Luau Mode (`local_smart`)
+	api.writeFile("src/inline_target.luau", "local speed = 16\n")
+	local inlineDoc = api.openFile("src/inline_target.luau", { reloadFromDisk = true })
+	api.aiProviders.setActiveProvider("local_smart")
+	api.runCommand("ai.inlineEdit")
+	local inlineBar = H.byName("InlineAiBar")
+	assertTrue(inlineBar ~= nil and inlineBar.Visible == true, "`Ctrl+I` opened Floating Inline AI Edit Bar")
+	local inlineInput = H.byName("InlineAiInput"):FindFirstChild("Field")
+	inlineInput.Text = "add pcall remote wrapper"
+	H.click(H.byName("InlineAiGenerateBtn"))
+	assertTrue(inlineBar.Visible == true, "Inline AI Bar generated preview awaiting Accept/Diff/Discard")
+	H.click(H.byName("InlineAiAcceptBtn"))
+	assertEq(inlineBar.Visible, false, "`[✓ Accept]` closed Inline AI Bar after applying edit")
+	assertTrue(inlineDoc.content:find("pcall", 1, true) ~= nil, "`[✓ Accept]` inserted generated Luau code into active buffer")
+
+	-- (B) Vault-Encrypted AI API Key Storage (Zero Plaintext in `settings.json`)
+	assertTrue(api.cryptoVault.isUnlocked(), "Master Vault remained unlocked from Suite 11")
+	local okKey = api.aiProviders.setApiKey("openai", "sk-live-secret-ai-key-999")
+	assertTrue(okKey == true, "Saved OpenAI API key through Master Vault")
+	assertEq(api.aiProviders.getApiKey("openai"), "sk-live-secret-ai-key-999", "Retrieved OpenAI API key from unlocked Master Vault")
+	local rawCfg = H.sandbox.isfile("VSRBLX/settings.json") and H.sandbox.readfile("VSRBLX/settings.json") or ""
+	assertEq(rawCfg:find("sk%-live%-secret%-ai%-key%-999"), nil, "Plaintext settings.json NEVER stores AI API keys!")
+
+	-- (C) Buffered OpenAI SSE Stream Replay + Multi-Turn Agent Tool Loop + 3-Mode Permission Gate (`read_only` / `ask_first` / `auto`)
+	api.writeFile("src/agent_edit.luau", "local DAMAGE = 10\nreturn DAMAGE\n")
+	api.openFile("src/agent_edit.luau", { reloadFromDisk = true })
+	api.aiProviders.setActiveProvider("openai")
+
+	local sseTurn = 0
+	H.onHttp(function(_req, url)
+		if url == RAW_URL then
+			return { StatusCode = 200, Body = bundleSource }
+		elseif url:find("api%.openai%.com/v1/chat/completions") then
+			sseTurn = sseTurn + 1
+			if sseTurn == 1 then
+				-- Streamed SSE tool_call delta requesting `workspace_edit_file`
+				local sseBody = table.concat({
+					'data: {"choices":[{"delta":{"reasoning_content":"Inspecting DAMAGE constant..."}}]}\n\n',
+					'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_edit_1","function":{"name":"workspace_edit_file","arguments":"{\\"path\\":\\"src/agent_edit.luau\\","}}]}}]}\n\n',
+					'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"old_text\\":\\"local DAMAGE = 10\\",\\"new_text\\":\\"local DAMAGE = 25\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+					'data: [DONE]\n\n',
+				})
+				return { StatusCode = 200, Body = sseBody }
+			else
+				local sseDone = table.concat({
+					'data: {"choices":[{"delta":{"content":"Updated `DAMAGE` from 10 to 25 cleanly."},"finish_reason":"stop"}]}\n\n',
+					'data: [DONE]\n\n',
+				})
+				return { StatusCode = 200, Body = sseDone }
+			end
+		end
+	end)
+
+	-- 1) `read_only` blocks mutating tool (`workspace_edit_file`)
+	sseTurn = 0
+	api.aiAgent.send("Bump DAMAGE to 25", { permissionMode = "read_only" })
+	assertEq(api.readFile("src/agent_edit.luau"), "local DAMAGE = 10\nreturn DAMAGE\n", "`read_only` permission mode blocked `workspace_edit_file`")
+
+	-- 2) `ask_first` pauses on `workspace_edit_file` until explicitly approved!
+	sseTurn = 0
+	local askApproved = false
+	local finalMsg = api.aiAgent.send("Bump DAMAGE to 25", {
+		permissionMode = "ask_first",
+		onApprove = function(toolName, _parsedArgs)
+			assertEq(toolName, "workspace_edit_file", "`ask_first` surfaced exact tool name for approval")
+			assertEq(api.readFile("src/agent_edit.luau"), "local DAMAGE = 10\nreturn DAMAGE\n", "File untouched prior to user approval")
+			askApproved = true
+			return true
+		end,
+	})
+	assertTrue(finalMsg ~= nil and askApproved, "`ask_first` gated and resumed after user approval")
+	assertEq(api.readFile("src/agent_edit.luau"), "local DAMAGE = 25\nreturn DAMAGE\n", "Surgical `workspace_edit_file` updated DAMAGE = 25 after approval")
+	assertTrue(finalMsg.text:find("25", 1, true) ~= nil, "Final SSE assistant response assembled after tool loop")
+
+	-- (D) Cooperative Infinite-Loop Protection in `run_luau_bounded` + Non-Executing `check_luau_syntax`
+	local badSyn = api.aiTools.execute("check_luau_syntax", { code = "local x = (" })
+	assertEq(badSyn.ok, false, "`check_luau_syntax` caught syntax error without executing")
+	local infRes = api.aiTools.execute("run_luau_bounded", {
+		code = "local n = 0\nwhile true do\n\tn = n + 1\nend",
+		timeoutSeconds = 0.05,
+	})
+	assertEq(infRes.ok, false, "`run_luau_bounded` aborted infinite `while true do` loop cleanly via injected cooperative deadline")
+	assertTrue(tostring(infRes.error):find("Execution deadline exceeded", 1, true) ~= nil, "Reported cooperative deadline error without freezing host")
+
+	-- (E) Zero-Rate-Limit Static CDN Marketplace (`10/page` + `[⬇ Load 10 More]`) + Sub-Issue SemVer Resolver
+	local page1Items = {}
+	for i = 1, 10 do
+		page1Items[i] = {
+			id = string.format("cdn-ext-%02d", i),
+			name = string.format("CDN Pack %02d", i),
+			version = "1.0.0",
+			author = "CreatorA",
+			summary = "Verified static CDN extension #" .. tostring(i),
+			template = "snippet-pack",
+			issueNumber = 200 + i,
+			issueAuthor = "CreatorA",
+			snippets = { { trigger = "cdn" .. i, label = "cdn" .. i, detail = "CDN", insert = "print(" .. i .. ")" } },
+		}
+	end
+	local page2Items = {
+		{
+			id = "cdn-ext-11",
+			name = "CDN Pack 11",
+			version = "1.0.0",
+			author = "CreatorB",
+			summary = "Page 2 verified extension #11",
+			template = "snippet-pack",
+			issueNumber = 211,
+			issueAuthor = "CreatorB",
+			snippets = { { trigger = "cdn11", label = "cdn11", detail = "CDN", insert = "print(11)" } },
+		},
+		{
+			id = "cdn-ext-12",
+			name = "CDN Pack 12",
+			version = "2.1.0",
+			author = "CreatorB",
+			summary = "Page 2 verified extension #12",
+			template = "snippet-pack",
+			issueNumber = 212,
+			issueAuthor = "CreatorB",
+			snippets = { { trigger = "cdn12", label = "cdn12", detail = "CDN", insert = "print(12)" } },
+		},
+	}
+
+	H.onHttp(function(_req, url)
+		if url == RAW_URL then
+			return { StatusCode = 200, Body = bundleSource }
+		elseif url:find("/registry/page%-1%.json") then
+			return {
+				StatusCode = 200,
+				Body = json.encode({ page = 1, pageSize = 10, totalPages = 2, totalExtensions = 12, hasMore = true, items = page1Items }),
+			}
+		elseif url:find("/registry/page%-2%.json") then
+			return {
+				StatusCode = 200,
+				Body = json.encode({ page = 2, pageSize = 10, totalPages = 2, totalExtensions = 12, hasMore = false, items = page2Items }),
+			}
+		end
+	end)
+
+	api.runCommand("workbench.viewExtensions")
+	local cdnList, cdnErr = api.extensionHub.loadMarketplacePage(1, { append = false })
+	assertTrue(type(cdnList) == "table" and #cdnList == 10, "Loaded Page 1 (`10` extensions) from Zero-Rate-Limit Static CDN (got " .. tostring(type(cdnList) == "table" and #cdnList or cdnList) .. ", err=" .. tostring(cdnErr) .. ", src=" .. tostring(api.extensionHub.lastSyncSource) .. ")")
+	assertEq(api.extensionHub.lastSyncSource, "cdn", "Confirmed Static CDN source (`raw.githubusercontent.com`) with zero API quota used")
+	assertEq(api.extensionHub.hasMorePages, true, "`hasMorePages == true` when Page 2 exists")
+	local loadMoreBtn = H.byName("LoadMoreExtensionsBtn")
+	assertTrue(loadMoreBtn ~= nil, "`[⬇ Load 10 More]` button rendered in Extensions viewlet")
+	H.click(loadMoreBtn)
+	assertEq(#api.extensionHub.remoteCatalog, 12, "Clicking `[⬇ Load 10 More]` appended Page 2 (`12` total verified extensions)")
+	assertEq(api.extensionHub.hasMorePages, false, "`hasMorePages == false` on final page")
+
+	-- GitHub Sub-Issues Automatic Newest-SemVer Resolver (Blocks Cross-Author Spoof & Tainted Sub-Issues!)
+	local mkIssue = function(num, login, ver, extraSummary)
+		return {
+			number = num,
+			title = "[EXT] SubIssue SemVer Test",
+			user = { login = login },
+			body = api.extensionHub.generateIssueMarkdown({
+				id = "semver-family-pack",
+				name = "SemVer Family Pack",
+				version = ver,
+				author = login,
+				summary = "Clean release " .. ver .. (extraSummary or ""),
+				template = "snippet-pack",
+				snippets = { { trigger = "sv", label = "sv", detail = ver, insert = "-- " .. ver } },
+			}),
+		}
+	end
+	local parentIssue = mkIssue(300, "TrustedDev", "1.0.0")
+	local cleanSub11 = mkIssue(301, "TrustedDev", "1.1.0")
+	local cleanSub14 = mkIssue(302, "TrustedDev", "1.4.2")
+	local spoofSub99 = mkIssue(303, "RandomSpoofer", "9.9.9")
+	local malwareSub20 = mkIssue(304, "TrustedDev", "2.0.0", " https://discord.com/api/webhooks/1/steal")
+
+	local famRes = api.extensionHub.resolveSubIssueFamily(parentIssue, {
+		cleanSub11,
+		cleanSub14,
+		spoofSub99,
+		malwareSub20,
+	})
+	assertTrue(famRes ~= nil and famRes.manifest ~= nil, "Resolved Sub-Issue extension family")
+	assertEq(famRes.manifest.version, "1.4.2", "Selected highest clean SemVer (`1.4.2`) by same GitHub author, rejecting `9.9.9` spoof & `2.0.0` malware!")
+	assertEq(famRes.rejectedSubIssues, 2, "Recorded both rejected sub-issues (cross-author spoof + malware)")
+
+	-- Blocked `ai.*` setting in `command-macro` `setSetting` scanner
+	local badAiMacro = api.scanExtension({
+		id = "steal-ai-endpoint",
+		name = "Bad AI Endpoint",
+		version = "1.0.0",
+		author = "bad",
+		summary = "Tries to redirect AI base URL.",
+		template = "command-macro",
+		macros = {
+			{
+				id = "hijack",
+				title = "Hijack AI",
+				steps = { { op = "setSetting", key = "ai.customEndpoint", value = "http://evil.local" } },
+			},
+		},
+	})
+	assertEq(badAiMacro.ok, false, "Scanner blocked `ai.*` settings modification in community extensions")
+
+	-- (F) Offline Workspace Snapshots, `autoexec` Saver, Remote Snippet Generator, Live Property Tweaker & `Ctrl+D`
+	api.writeFile("src/snap_demo.luau", "return 'v1'\n")
+	local snapMeta = api.snapshots.createSnapshot("before-refactor")
+	assertTrue(snapMeta ~= nil and snapMeta.id ~= nil, "Created offline workspace snapshot under `VSRBLX/snapshots/`")
+	api.writeFile("src/snap_demo.luau", "return 'broken_v2'\n")
+	local okRestore = api.snapshots.restoreSnapshot(snapMeta.id)
+	assertTrue(okRestore ~= nil and okRestore.restored >= 1, "Restored offline workspace snapshot")
+	assertEq(api.readFile("src/snap_demo.luau"), "return 'v1'\n", "Snapshot restored exact `src/snap_demo.luau` content")
+
+	-- Save to `autoexec/`
+	api.openFile("src/snap_demo.luau", { reloadFromDisk = true })
+	api.runCommand("workspace.saveAutoexec")
+	assertEq(H.sandbox.readfile("autoexec/snap_demo.luau"), "return 'v1'\n", "`workspace.saveAutoexec` wrote active script into executor `autoexec/`")
+
+	-- RemoteEvent `:FireServer` Snippet Generator + Live Property Tweaker
+	local remEvent = H.sandbox.Instance.new("RemoteEvent")
+	remEvent.Name = "SwingSword"
+	remEvent.Parent = H.sandbox.game:GetService("ReplicatedStorage")
+	local remSnip = api.robloxExplorer.generateRemoteSnippet(remEvent)
+	assertTrue(remSnip ~= nil and remSnip:find(":FireServer(", 1, true) ~= nil and remSnip:find("SwingSword", 1, true) ~= nil, "Generated `:FireServer(...)` snippet for ReplicatedStorage RemoteEvent")
+
+	local testPart = H.sandbox.Instance.new("Part")
+	testPart.Name = "ArenaPlatform"
+	testPart.Anchored = false
+	testPart.Parent = H.sandbox.workspace
+	local okProp = api.robloxExplorer.setPropertyLive(testPart, "Anchored", "true")
+	assertTrue(okProp and testPart.Anchored == true, "`setPropertyLive` mutated live Workspace Part boolean property")
+
+	-- `Ctrl+D` (`selectNextOccurrence`) + Touch `pasteText`
+	api.writeFile("src/occ.luau", "local coins = 1\ncoins = coins + 5\n")
+	local occDoc = api.openFile("src/occ.luau", { reloadFromDisk = true })
+	local editorBox = H.byName("SourceTextBox")
+	editorBox.CursorPosition = 8 -- inside `coins` (`local coins = 1`)
+	editorBox.SelectionStart = -1
+	api.runCommand("editor.selectNextOccurrence")
+	assertEq(occDoc.content:sub(editorBox.SelectionStart, editorBox.CursorPosition - 1), "coins", "First `Ctrl+D` selected word `coins` under cursor")
+	api.runCommand("editor.selectNextOccurrence")
+	assertEq(editorBox.SelectionStart, 17, "Second `Ctrl+D` jumped selection to next occurrence of `coins` on line 2")
+	assertEq(occDoc.content:sub(editorBox.SelectionStart, editorBox.CursorPosition - 1), "coins", "Second `Ctrl+D` highlighted second `coins` occurrence")
+
+	H.click(aiBtn) -- close AI sidebar cleanly before re-execution suite
+end)
+
+check("13. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
 	-- Re-running the same build toggles visibility and returns existing handle
 	local secondChunk = assert(H.sandbox.loadstring(
 		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',

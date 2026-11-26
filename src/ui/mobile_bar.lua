@@ -11,6 +11,9 @@ return function(env)
 
 	local KEYS = {
 		{ id = "tab", label = "⇥ Tab", width = 50, insert = "\t" },
+		{ id = "copy", label = "📋 Copy", width = 56, cmd = "editor.touchCopy" },
+		{ id = "paste", label = "📥 Paste", width = 58, cmd = "editor.touchPaste" },
+		{ id = "ai", label = "✦ AI", width = 48, cmd = "ai.inlineEdit", accent = true },
 		{ id = "lbrace", label = "{", width = 32, insert = "{" },
 		{ id = "rbrace", label = "}", width = 32, insert = "}" },
 		{ id = "lparen", label = "(", width = 32, insert = "(" },
@@ -31,6 +34,7 @@ return function(env)
 		{ id = "gt", label = ">", width = 32, insert = ">" },
 		{ id = "undo", label = "↶", width = 36, cmd = "edit.undo" },
 		{ id = "redo", label = "↷", width = 36, cmd = "edit.redo" },
+		{ id = "autoexec", label = "⚡ Autoexec", width = 76, cmd = "workspace.saveAutoexec" },
 		{ id = "play", label = "🎮 Play+Code", width = 88, cmd = "mobile.togglePlayWhileCoding", accent = true },
 		{ id = "run", label = "▶ Run", width = 56, cmd = "run.active", good = true },
 	}

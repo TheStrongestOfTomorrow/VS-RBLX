@@ -54,6 +54,19 @@ return function(env)
 			activeBranch = "main",
 			autoSyncOnPush = true,
 		},
+		vault = {
+			mode = "unset",
+			promptedOnce = false,
+		},
+		ai = {
+			provider = "kilo",
+			model = "kilo-auto/free",
+			permissionMode = "ask_first",
+			sidebarVisible = false,
+			sidebarWidth = 285,
+			customEndpoint = "http://127.0.0.1:11434/v1/chat/completions",
+			keys = {},
+		},
 		git = {
 			sideBySideDiff = true,
 			gutterDecorations = true,

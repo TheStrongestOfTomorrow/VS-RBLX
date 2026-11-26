@@ -209,22 +209,175 @@ return function(env)
 		P.list(gameContainer, Enum.FillDirection.Vertical, 1)
 
 		local function openInstanceInspector(inst)
-			local props = robloxExplorer.inspectProperties(inst)
+			local props = robloxExplorer.inspectProperties(inst) or {}
 			local luauPath = robloxExplorer.luauPathOf(inst)
-			local lines = {
-				"-- Roblox Instance Inspector (Read-Only Snapshot)",
-				"-- Luau Path: " .. luauPath,
-				"",
-				"local target = " .. luauPath,
-				"local properties = {",
-			}
-			for _, kv in ipairs(props) do
-				lines[#lines + 1] = string.format("\t[%q] = %q,", kv.key, kv.value)
+			local clsName = tostring(inst.ClassName or "Instance")
+			local isRemote = (clsName == "RemoteEvent" or clsName == "RemoteFunction" or clsName == "UnreliableRemoteEvent" or clsName == "BindableEvent" or clsName == "BindableFunction")
+
+			local card = overlay.openModal("ExplorerPropTweakerModal", 440, 310)
+			P.pad(card, 12, 14, 12, 14)
+
+			P.label(card, {
+				size = UDim2.new(1, -28, 0, 20),
+				bold = true,
+				textSize = 13,
+				color = theme.color.tabActiveText,
+				text = "🔧 Live Property Tweaker — " .. tostring(inst.Name) .. " (" .. clsName .. ")",
+				truncate = true,
+				zIndex = 232,
+			})
+			P.button(card, {
+				size = UDim2.fromOffset(24, 22),
+				pos = UDim2.new(1, -24, 0, 0),
+				text = "✕",
+				radius = 4,
+				zIndex = 232,
+				onClick = function() overlay.closeModal() end,
+			})
+
+			P.label(card, {
+				size = UDim2.new(1, 0, 0, 16),
+				pos = UDim2.fromOffset(0, 22),
+				mono = true,
+				textSize = 10,
+				color = theme.color.accent,
+				text = luauPath,
+				truncate = true,
+				zIndex = 232,
+			})
+
+			local propScroll = P.scroll(card, {
+				name = "PropTweakerScroll",
+				size = UDim2.new(1, 0, 1, -76),
+				pos = UDim2.fromOffset(0, 42),
+				bg = theme.color.editor,
+				zIndex = 232,
+			})
+			P.pad(propScroll, 6, 6, 6, 6)
+			P.list(propScroll, Enum.FillDirection.Vertical, 4)
+
+			for idx, kv in ipairs(props) do
+				local pName = tostring(kv.name or kv.key or "")
+				local pVal = tostring(kv.value or "")
+				local readOnly = (pName == "ClassName" or pName == "Children" or pName == "LuauPath")
+
+				local row = P.frame(propScroll, {
+					size = UDim2.new(1, 0, 0, 26),
+					order = idx,
+					zIndex = 233,
+				})
+				P.label(row, {
+					size = UDim2.fromOffset(118, 26),
+					mono = true,
+					textSize = 11,
+					color = theme.color.sideBarText,
+					text = pName,
+					truncate = true,
+					zIndex = 234,
+				})
+				if readOnly then
+					P.label(row, {
+						size = UDim2.new(1, -124, 1, 0),
+						pos = UDim2.fromOffset(122, 0),
+						mono = true,
+						textSize = 11,
+						color = theme.color.muted,
+						text = pVal,
+						truncate = true,
+						zIndex = 234,
+					})
+				else
+					local _, vBox = P.input(row, {
+						name = "PropInput_" .. pName,
+						size = UDim2.new(1, -178, 0, 24),
+						pos = UDim2.fromOffset(122, 1),
+						mono = true,
+						value = pVal,
+						zIndex = 234,
+					})
+					local setBtn = P.button(row, {
+						name = "PropApply_" .. pName,
+						size = UDim2.fromOffset(50, 24),
+						pos = UDim2.new(1, -50, 0, 1),
+						bg = theme.color.inputBg,
+						hoverBg = theme.color.accent,
+						text = "Apply",
+						textSize = 10,
+						radius = 3,
+						zIndex = 234,
+						onClick = function()
+							local okS, msg = robloxExplorer.setPropertyLive(inst, pName, vBox.Text)
+							if okS then
+								vBox.Text = tostring(msg)
+								overlay.toast("Updated " .. pName .. " = " .. tostring(msg), "good", 1.8)
+							else
+								overlay.toast("Set failed: " .. tostring(msg), "bad", 2.5)
+							end
+						end,
+					})
+					setBtn.BackgroundTransparency = 0
+				end
 			end
-			lines[#lines + 1] = "}"
-			local doc = codeStore.newUntitled(table.concat(lines, "\n"), "luau")
-			doc.title = "Inspect: " .. tostring(inst.Name)
-			codeStore.changed:fire({ reason = "inspect", id = doc.id })
+
+			local foot = P.frame(card, {
+				size = UDim2.new(1, 0, 0, 26),
+				pos = UDim2.new(0, 0, 1, -26),
+				zIndex = 232,
+			})
+			P.list(foot, Enum.FillDirection.Horizontal, 6, Enum.HorizontalAlignment.Right)
+
+			if isRemote then
+				local remBtn = P.button(foot, {
+					name = "PropGenRemoteBtn",
+					size = UDim2.fromOffset(148, 24),
+					bg = theme.color.good,
+					color = Color3.fromRGB(16, 24, 20),
+					bold = true,
+					text = "⚡ Generate Remote Luau",
+					textSize = 10,
+					radius = 4,
+					order = 1,
+					zIndex = 233,
+					onClick = function()
+						local snip = robloxExplorer.generateRemoteSnippet(inst)
+						overlay.closeModal()
+						local doc = codeStore.newUntitled(snip, "luau")
+						doc.title = tostring(inst.Name) .. "_Remote.luau"
+						codeStore.changed:fire({ reason = "remoteSnippet", id = doc.id })
+					end,
+				})
+				remBtn.BackgroundTransparency = 0
+			end
+
+			local snapBtn = P.button(foot, {
+				name = "PropOpenSnapshotTabBtn",
+				size = UDim2.fromOffset(132, 24),
+				bg = theme.color.accent,
+				hoverBg = theme.color.accentHover,
+				color = Color3.fromRGB(255, 255, 255),
+				bold = true,
+				text = "Open in Editor Tab",
+				textSize = 10,
+				radius = 4,
+				order = 2,
+				zIndex = 233,
+				onClick = function()
+					overlay.closeModal()
+					local lines = {
+						"-- Roblox Instance Inspector",
+						"local target = " .. luauPath,
+						"local properties = {",
+					}
+					for _, kv in ipairs(props) do
+						lines[#lines + 1] = string.format("\t[%q] = %q,", tostring(kv.name or kv.key), tostring(kv.value))
+					end
+					lines[#lines + 1] = "}"
+					local doc = codeStore.newUntitled(table.concat(lines, "\n"), "luau")
+					doc.title = "Inspect: " .. tostring(inst.Name)
+					codeStore.changed:fire({ reason = "inspect", id = doc.id })
+				end,
+			})
+			snapBtn.BackgroundTransparency = 0
 		end
 
 		local expandedInstances = {}

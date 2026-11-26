@@ -336,7 +336,7 @@ function validateIssue(title, body) {
   };
 }
 
-if (process.argv.includes("--self-test")) {
+if (require.main === module && process.argv.includes("--self-test")) {
   // 1. Valid theme-pack issue
   const goodBody = [
     "### Extension Template",
@@ -414,4 +414,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { validateIssue, parseIssueMarkdown };
+module.exports = { validateIssue, scanExtensionIssue: validateIssue, parseIssueMarkdown };

@@ -373,5 +373,46 @@ return function(env)
 		return newText, newCursor
 	end
 
+	-- 8. `Ctrl+D` Select Word / Next Occurrence (`M.selectNextOccurrence`)
+	-- If nothing is selected, expands selection to the identifier under `cursorPos`.
+	-- If a substring is already selected, jumps to & selects the NEXT matching occurrence!
+	function M.selectNextOccurrence(source, cursorPos, selStart)
+		source = tostring(source or "")
+		local n = #source
+		if n == 0 then return 1, -1, nil end
+		local cur = util.clamp(tonumber(cursorPos) or 1, 1, n + 1)
+		local sel = tonumber(selStart) or -1
+
+		if sel <= 0 or sel == cur then
+			local probe = math.min(cur, n)
+			if not source:sub(probe, probe):match("[%w_]") and probe > 1 and source:sub(probe - 1, probe - 1):match("[%w_]") then
+				probe = probe - 1
+			end
+			if not source:sub(probe, probe):match("[%w_]") then
+				return cur, -1, nil
+			end
+			local s = probe
+			while s > 1 and source:sub(s - 1, s - 1):match("[%w_]") do s = s - 1 end
+			local e = probe
+			while e < n and source:sub(e + 1, e + 1):match("[%w_]") do e = e + 1 end
+			return e + 1, s, source:sub(s, e)
+		end
+
+		local lo = math.min(sel, cur)
+		local hi = math.max(sel, cur) - 1
+		local needle = source:sub(lo, hi)
+		if needle == "" then return cur, sel, nil end
+
+		local nextS, nextE = source:find(needle, hi + 1, true)
+		if not nextS and lo > 1 then
+			-- Wrap around to top of document
+			nextS, nextE = source:find(needle, 1, true)
+		end
+		if nextS then
+			return nextE + 1, nextS, needle
+		end
+		return cur, sel, needle
+	end
+
 	return M
 end

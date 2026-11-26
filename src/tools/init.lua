@@ -9,6 +9,7 @@ return function(env)
 		terminal = env.require("tools/terminal_cmds"),
 		instancePicker = env.require("tools/instance_picker"),
 		projectBundler = env.require("tools/project_bundler"),
+		snapshots = env.require("tools/snapshots"),
 	}
 	return M
 end

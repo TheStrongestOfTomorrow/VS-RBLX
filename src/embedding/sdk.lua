@@ -8,6 +8,7 @@ return function(env)
 	local intellisense = env.require("runtime/intellisense")
 	local previewEngine = env.require("runtime/preview_engine")
 	local extensionHub = env.require("runtime/extension_hub")
+	local cryptoVault = env.require("runtime/crypto_vault")
 	local codeStore = env.require("runtime/code_store")
 	local codeDiff = env.require("runtime/code_diff")
 	local todoScanner = env.require("runtime/todo_scanner")
@@ -26,6 +27,10 @@ return function(env)
 	local terminalCmds = env.require("tools/terminal_cmds")
 	local instancePicker = env.require("tools/instance_picker")
 	local projectBundler = env.require("tools/project_bundler")
+	local snapshots = env.require("tools/snapshots")
+	local aiProviders = env.require("ai/providers")
+	local aiTools = env.require("ai/tools")
+	local aiAgent = env.require("ai/agent_loop")
 
 	local M = {}
 
@@ -46,6 +51,8 @@ return function(env)
 			intellisense = intellisense,
 			previewEngine = previewEngine,
 			extensionHub = extensionHub,
+			cryptoVault = cryptoVault,
+			vault = cryptoVault,
 			responsive = responsive,
 			codeStore = codeStore,
 			editor = codeStore,
@@ -60,6 +67,11 @@ return function(env)
 			terminal = terminalCmds,
 			instancePicker = instancePicker,
 			bundler = projectBundler,
+			snapshots = snapshots,
+			aiProviders = aiProviders,
+			aiTools = aiTools,
+			aiAgent = aiAgent,
+			ai = aiAgent,
 			git = gitState,
 			github = githubSync,
 			theme = theme,
@@ -96,6 +108,18 @@ return function(env)
 			end,
 			isMobileMode = function()
 				if app and app.isMobileMode then return app.isMobileMode() end
+				return false
+			end,
+			setResizeMode = function(flag)
+				if app and app.window and app.window.setResizeMode then return app.window.setResizeMode(flag) end
+				return false
+			end,
+			toggleResizeMode = function()
+				if app and app.window and app.window.toggleResizeMode then return app.window.toggleResizeMode() end
+				return false
+			end,
+			isResizeMode = function()
+				if app and app.window then return app.window.resizeMode == true end
 				return false
 			end,
 			toggleZenMode = function() return commands.run("workbench.toggleZenMode") end,

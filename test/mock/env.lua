@@ -443,6 +443,20 @@ function M.new(opts)
 			consoleOut[#consoleOut + 1] = "[WARN] " .. table.concat(t, "\t")
 		end,
 	}
+	do
+		local okBit, ljBit = pcall(require, "bit")
+		if okBit and ljBit then
+			local MOD32 = 4294967296
+			sandbox.bit32 = {
+				band = function(a, b) return ljBit.band(a, b) % MOD32 end,
+				bor = function(a, b) return ljBit.bor(a, b) % MOD32 end,
+				bxor = function(a, b) return ljBit.bxor(a, b) % MOD32 end,
+				bnot = function(a) return ljBit.bnot(a) % MOD32 end,
+				rshift = function(a, n) return ljBit.rshift(a % MOD32, n) % MOD32 end,
+				lshift = function(a, n) return ljBit.lshift(a % MOD32, n) % MOD32 end,
+			}
+		end
+	end
 	if opts.allowHostLoadfile == true then
 		sandbox.loadfile = function(path)
 			local fh, openErr = io.open(path, "rb")

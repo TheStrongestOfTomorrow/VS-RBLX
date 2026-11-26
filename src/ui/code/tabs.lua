@@ -34,7 +34,7 @@ return function(env)
 
 		local tabsScroll = P.scroll(root, {
 			name = "TabsScroll",
-			size = UDim2.new(1, -180, 1, -1),
+			size = UDim2.new(1, -244, 1, -1),
 			direction = Enum.ScrollingDirection.X,
 			autoCanvas = Enum.AutomaticSize.X,
 			barThickness = 3,
@@ -44,11 +44,99 @@ return function(env)
 
 		local actionsBar = P.frame(root, {
 			name = "EditorActions",
-			size = UDim2.fromOffset(174, h - 1),
-			pos = UDim2.new(1, -176, 0, 0),
+			size = UDim2.fromOffset(240, h - 1),
+			pos = UDim2.new(1, -242, 0, 0),
 			zIndex = 22,
 		})
-		P.list(actionsBar, Enum.FillDirection.Horizontal, 3, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
+		P.list(actionsBar, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
+
+		-- Multi-Tab Overflow Controls (`‹`, `›`, `+`, and `▾ N` Open Tabs Switcher!)
+		local scrollLeftBtn = P.button(actionsBar, {
+			name = "ScrollTabsLeftBtn",
+			size = UDim2.fromOffset(20, 24),
+			text = "‹",
+			bold = true,
+			textSize = 14,
+			color = theme.color.muted,
+			radius = 4,
+			order = -4,
+			zIndex = 23,
+			onClick = function()
+				local cx = tabsScroll.CanvasPosition.X
+				tabsScroll.CanvasPosition = Vector2.new(math.max(0, cx - 150), 0)
+			end,
+		})
+
+		local scrollRightBtn = P.button(actionsBar, {
+			name = "ScrollTabsRightBtn",
+			size = UDim2.fromOffset(20, 24),
+			text = "›",
+			bold = true,
+			textSize = 14,
+			color = theme.color.muted,
+			radius = 4,
+			order = -3,
+			zIndex = 23,
+			onClick = function()
+				local cx = tabsScroll.CanvasPosition.X
+				tabsScroll.CanvasPosition = Vector2.new(cx + 150, 0)
+			end,
+		})
+
+		local newTabBtn = P.button(actionsBar, {
+			name = "NewTabBtn",
+			size = UDim2.fromOffset(22, 24),
+			text = "+",
+			bold = true,
+			textSize = 13,
+			color = theme.color.tabActiveText,
+			radius = 4,
+			order = -2,
+			zIndex = 23,
+			onClick = function()
+				commands.run("file.newUntitled")
+			end,
+		})
+
+		local allTabsBtn = P.button(actionsBar, {
+			name = "AllOpenTabsBtn",
+			size = UDim2.fromOffset(36, 24),
+			bg = theme.color.inputBg,
+			hoverBg = theme.color.hover,
+			text = "▾ 1",
+			mono = true,
+			bold = true,
+			textSize = 10,
+			color = theme.color.tabActiveText,
+			radius = 4,
+			order = -1,
+			zIndex = 23,
+			onClick = function()
+				local items = {
+					{ label = "＋ New Untitled Tab", shortcut = "Ctrl+N", onClick = function() commands.run("file.newUntitled") end },
+					{ separator = true },
+				}
+				local curActive = codeStore.active(pane)
+				local curId = curActive and curActive.id or nil
+				for idx, d in ipairs(codeStore.tabs) do
+					local prefix = (d.id == curId) and "● " or "   "
+					local dirtySuffix = d.dirty and " *" or ""
+					items[#items + 1] = {
+						label = string.format("%s%d. %s%s", prefix, idx, d.title, dirtySuffix),
+						shortcut = d.langId or "",
+						onClick = function()
+							codeStore.activate(d.id, pane)
+						end,
+					}
+				end
+				items[#items + 1] = { separator = true }
+				items[#items + 1] = { label = "Close Saved Tabs", onClick = function() codeStore.closeSaved() end }
+				items[#items + 1] = { label = "Close All Clean Tabs", onClick = function() codeStore.closeAll() end }
+				local p = actionsBar.AbsolutePosition
+				overlay.dropdown(p.X, p.Y + h, items, 240)
+			end,
+		})
+		allTabsBtn.BackgroundTransparency = 0.25
 
 		-- Language-gated Live Split Preview button (strictly hidden on non-previewable languages!)
 		local previewBtn = P.button(actionsBar, {
@@ -72,7 +160,7 @@ return function(env)
 
 		local runBtn = P.button(actionsBar, {
 			name = "RunTabBtn",
-			size = UDim2.fromOffset(30, 26),
+			size = UDim2.fromOffset(28, 26),
 			text = "▶",
 			bold = true,
 			color = theme.color.good,
@@ -84,7 +172,7 @@ return function(env)
 
 		local saveBtn = P.button(actionsBar, {
 			name = "SaveTabBtn",
-			size = UDim2.fromOffset(36, 26),
+			size = UDim2.fromOffset(34, 26),
 			text = "Save",
 			textSize = 11,
 			color = theme.color.sideBarText,
@@ -96,7 +184,7 @@ return function(env)
 
 		local splitBtn = P.button(actionsBar, {
 			name = "SplitPaneBtn",
-			size = UDim2.fromOffset(28, 26),
+			size = UDim2.fromOffset(26, 26),
 			text = "⫿",
 			textSize = 14,
 			color = theme.color.sideBarText,
@@ -106,10 +194,27 @@ return function(env)
 			onClick = function() codeStore.toggleSplit() end,
 		})
 
+		local currentBarW = 800
+
 		local function rebuild()
 			root.Size = UDim2.new(1, 0, 0, h)
-			actionsBar.Size = UDim2.fromOffset(178, h - 1)
-			actionsBar.Position = UDim2.new(1, -180, 0, 0)
+			local compact = currentBarW < 520
+			local totalTabs = #codeStore.tabs
+			allTabsBtn.Text = "▾ " .. tostring(totalTabs)
+
+			-- Show `‹ ›` scroll arrows when 3+ tabs are open and width allows
+			local showArrows = (totalTabs >= 3) and (not compact)
+			scrollLeftBtn.Visible = showArrows
+			scrollRightBtn.Visible = showArrows
+			saveBtn.Visible = not compact
+			splitBtn.Visible = not compact
+			previewBtn.Size = UDim2.fromOffset(compact and 30 or 64, 26)
+			previewBtn.Text = compact and "◫" or "◫ Preview"
+
+			local actW = compact and 136 or (showArrows and 254 or 210)
+			actionsBar.Size = UDim2.fromOffset(actW, h - 1)
+			actionsBar.Position = UDim2.new(1, -(actW + 2), 0, 0)
+			tabsScroll.Size = UDim2.new(1, -(actW + 6), 1, -1)
 
 			local activeDoc = codeStore.active(pane)
 			local activeId = activeDoc and activeDoc.id or nil
@@ -267,7 +372,12 @@ return function(env)
 		return {
 			root = root,
 			previewButton = previewBtn,
+			allTabsButton = allTabsBtn,
 			refresh = rebuild,
+			reflow = function(barW)
+				currentBarW = tonumber(barW) or currentBarW
+				rebuild()
+			end,
 			height = function() return h end,
 			setMobileMode = function(flag)
 				mobileMode = flag == true

@@ -222,6 +222,18 @@ return function(_env)
 			description = "Docks VS-RBLX to the right side at translucent Ghost opacity so you can play and code simultaneously.",
 			kind = "boolean",
 		},
+		{
+			key = "vault.mode",
+			category = "Security",
+			title = "Zero-Knowledge Master Vault Mode",
+			description = "Controls whether GitHub PATs are encrypted via PBKDF2-HMAC-SHA256 (`encrypted`) or left unencrypted (`off`). Use the 🔐 Vault button in the Topbar to create/unlock/reset.",
+			kind = "select",
+			options = {
+				{ value = "unset", label = "Ask on Startup" },
+				{ value = "encrypted", label = "Encrypted (Master Key Required)" },
+				{ value = "off", label = "Unencrypted (Opted Out)" },
+			},
+		},
 	}
 
 	function M.categories()

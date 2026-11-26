@@ -1,4 +1,6 @@
--- Draggable, Auto-Resized, and 8-Direction Player-Resizable Window Shell for VS-RBLX.
+-- Draggable, Auto-Resized, and Explicit Toggle-Resizable (`⤢` ON/OFF) Window Shell for VS-RBLX.
+-- Supports both Desktop and Mobile Acode Mode as a movable floating window (with `□` Maximize
+-- when full-bleed is desired) + a draggable `MinimizedPill` (`VS-RBLX ↗`).
 return function(env)
 	local util = env.require("runtime/util")
 	local config = env.require("runtime/config")
@@ -10,11 +12,11 @@ return function(env)
 	local brand = env.require("ui/brand")
 	local P = env.require("ui/primitives")
 
-	local MIN_W = 540
-	local MIN_H = 320
+	local DESKTOP_MIN_W = 360
+	local DESKTOP_MIN_H = 240
+	local MOBILE_MIN_W = 280
+	local MOBILE_MIN_H = 200
 	local SNAP_EDGE = 12
-	local HANDLE_THICK = 6
-	local CORNER_SIZE = 14
 
 	local M = {}
 
@@ -25,9 +27,11 @@ return function(env)
 			minimised = false,
 			maximised = config.get("window.maximised", false) == true,
 			mobileMode = false,
+			resizeMode = false, -- Explicit Topbar `⤢` Resize Toggle (OFF by default so edges never hijack moving!)
 			playWhileCoding = config.get("mobile.playWhileCoding", false) == true,
 			opacity = initOpacity,
 			opacityChanged = signal.new("window.opacityChanged"),
+			resizeModeChanged = signal.new("window.resizeModeChanged"),
 			snappedSide = nil,
 			onResize = nil,
 		}
@@ -55,11 +59,11 @@ return function(env)
 		})
 		win.body = contentHost
 
-		-- Minimized floating launcher pill
+		-- Minimized floating launcher pill (now draggable so mobile players can move it away from thumbsticks!)
 		local pill = P.button(parentScreen, {
 			name = "MinimizedPill",
 			size = UDim2.fromOffset(128, 32),
-			pos = UDim2.new(0, 16, 1, -48),
+			pos = UDim2.new(0, 16, 1, -52),
 			bg = theme.color.titleBar,
 			hoverBg = theme.color.hover,
 			text = "",
@@ -67,9 +71,6 @@ return function(env)
 			border = theme.color.accent,
 			visible = false,
 			zIndex = 190,
-			onClick = function()
-				win.restore()
-			end,
 		})
 		local pillBrand = brand.draw(pill, 16, 192)
 		pillBrand.Position = UDim2.fromOffset(10, 8)
@@ -85,6 +86,29 @@ return function(env)
 		win.pill = pill
 
 		local preSnapRect = nil
+		local activeGesture = nil
+		local pillDidDrag = false
+
+		pill.InputBegan:Connect(function(input)
+			local kind = input.UserInputType
+			if kind ~= Enum.UserInputType.MouseButton1 and kind ~= Enum.UserInputType.Touch then return end
+			pillDidDrag = false
+			local absP = pill.AbsolutePosition
+			activeGesture = {
+				mode = "pillDrag",
+				input = input,
+				startMouse = input.Position,
+				startX = absP.X,
+				startY = absP.Y,
+			}
+		end)
+		pill.Activated:Connect(function()
+			if pillDidDrag then
+				pillDidDrag = false
+				return
+			end
+			win.restore()
+		end)
 
 		local function persistRect()
 			if win.maximised or win.snappedSide then return end
@@ -95,21 +119,23 @@ return function(env)
 			config.set("window.placed", true, { quiet = true })
 		end
 
+		function win.effectiveMinBounds(bounds)
+			local minW = win.mobileMode and MOBILE_MIN_W or DESKTOP_MIN_W
+			local minH = win.mobileMode and MOBILE_MIN_H or DESKTOP_MIN_H
+			return math.min(minW, bounds.width), math.min(minH, bounds.height)
+		end
+
 		function win.applyLayout(reason)
-			local isMobFull = win.mobileMode and not win.playWhileCoding
-			local bounds = responsive.usableRect((win.maximised or isMobFull) and 0 or 8)
-			local minW = win.mobileMode and 300 or MIN_W
-			local minH = win.mobileMode and 220 or MIN_H
-			local effMinW = math.min(minW, bounds.width)
-			local effMinH = math.min(minH, bounds.height)
+			local bounds = responsive.usableRect(win.maximised and 0 or 6)
+			local effMinW, effMinH = win.effectiveMinBounds(bounds)
 
 			if win.playWhileCoding then
-				-- Play-While-Coding Split Peek: docks to the right ~52% so the left half stays open for thumbstick & gameplay!
+				-- Play-While-Coding Split Peek: docks to right ~52% so left half stays free for thumbstick & gameplay!
 				local dockW = math.max(effMinW, math.floor(bounds.width * 0.52))
 				local dockH = math.max(effMinH, math.floor(bounds.height * 0.94))
 				root.Position = UDim2.fromOffset(bounds.x + bounds.width - dockW, bounds.y)
 				root.Size = UDim2.fromOffset(dockW, dockH)
-			elseif win.maximised or isMobFull then
+			elseif win.maximised then
 				root.Position = UDim2.fromOffset(bounds.x, bounds.y)
 				root.Size = UDim2.fromOffset(bounds.width, bounds.height)
 			elseif win.snappedSide == "left" then
@@ -126,8 +152,14 @@ return function(env)
 
 				local w, h
 				if autoScale and (not customSize or reason == "resetAuto") then
-					local scaleW = tonumber(config.get("window.widthScale", 0.84)) or 0.84
-					local scaleH = tonumber(config.get("window.heightScale", 0.84)) or 0.84
+					local defScaleW = win.mobileMode and 0.90 or 0.84
+					local defScaleH = win.mobileMode and 0.86 or 0.84
+					local scaleW = tonumber(config.get("window.widthScale", defScaleW)) or defScaleW
+					local scaleH = tonumber(config.get("window.heightScale", defScaleH)) or defScaleH
+					if win.mobileMode and not customSize then
+						scaleW = defScaleW
+						scaleH = defScaleH
+					end
 					w = math.floor(bounds.width * scaleW)
 					h = math.floor(bounds.height * scaleH)
 				else
@@ -158,22 +190,30 @@ return function(env)
 			end
 		end
 
-		-- 8-way interactive edge & corner resize handles
+		-- 8-way Push/Pull Resize Handles (ONLY active & visible when `win.resizeMode == true`!)
 		local resizeHandles = {}
-		local activeGesture = nil
 
-		local function makeResizeZone(name, sizeUDim, posUDim, dirX, dirY)
+		local function makeResizeZone(name, dirX, dirY, isCorner)
 			local zone = P.frame(root, {
 				name = name,
-				size = sizeUDim,
-				pos = posUDim,
-				active = true,
+				size = UDim2.fromOffset(14, 14),
+				pos = UDim2.fromOffset(0, 0),
+				bg = theme.color.accent,
+				transparency = 0.20,
+				radius = isCorner and 6 or 3,
+				visible = false,
+				active = false,
 				zIndex = 95,
 			})
-			zone.BackgroundTransparency = 1
-			resizeHandles[#resizeHandles + 1] = zone
+			resizeHandles[#resizeHandles + 1] = {
+				zone = zone,
+				dirX = dirX,
+				dirY = dirY,
+				isCorner = isCorner == true,
+			}
 
 			zone.InputBegan:Connect(function(input)
+				if not win.resizeMode then return end
 				local kind = input.UserInputType
 				if kind ~= Enum.UserInputType.MouseButton1 and kind ~= Enum.UserInputType.Touch then return end
 				if win.maximised then return end
@@ -192,43 +232,106 @@ return function(env)
 			end)
 		end
 
-		makeResizeZone("ResizeLeft", UDim2.new(0, HANDLE_THICK, 1, -CORNER_SIZE * 2), UDim2.fromOffset(0, CORNER_SIZE), -1, 0)
-		makeResizeZone("ResizeRight", UDim2.new(0, HANDLE_THICK, 1, -CORNER_SIZE * 2), UDim2.new(1, -HANDLE_THICK, 0, CORNER_SIZE), 1, 0)
-		makeResizeZone("ResizeTop", UDim2.new(1, -CORNER_SIZE * 2, 0, HANDLE_THICK), UDim2.fromOffset(CORNER_SIZE, 0), 0, -1)
-		makeResizeZone("ResizeBottom", UDim2.new(1, -CORNER_SIZE * 2, 0, HANDLE_THICK), UDim2.new(0, CORNER_SIZE, 1, -HANDLE_THICK), 0, 1)
-		makeResizeZone("ResizeTopLeft", UDim2.fromOffset(CORNER_SIZE, CORNER_SIZE), UDim2.fromOffset(0, 0), -1, -1)
-		makeResizeZone("ResizeTopRight", UDim2.fromOffset(CORNER_SIZE, CORNER_SIZE), UDim2.new(1, -CORNER_SIZE, 0, 0), 1, -1)
-		makeResizeZone("ResizeBottomLeft", UDim2.fromOffset(CORNER_SIZE, CORNER_SIZE), UDim2.new(0, 0, 1, -CORNER_SIZE), -1, 1)
-		makeResizeZone("ResizeBottomRight", UDim2.fromOffset(CORNER_SIZE, CORNER_SIZE), UDim2.new(1, -CORNER_SIZE, 1, -CORNER_SIZE), 1, 1)
+		makeResizeZone("ResizeLeft", -1, 0, false)
+		makeResizeZone("ResizeRight", 1, 0, false)
+		makeResizeZone("ResizeTop", 0, -1, false)
+		makeResizeZone("ResizeBottom", 0, 1, false)
+		makeResizeZone("ResizeTopLeft", -1, -1, true)
+		makeResizeZone("ResizeTopRight", 1, -1, true)
+		makeResizeZone("ResizeBottomLeft", -1, 1, true)
+		makeResizeZone("ResizeBottomRight", 1, 1, true)
 
-		-- Subtle diagonal grip dots on bottom-right corner
-		local gripVisual = P.frame(root, {
-			name = "ResizeGripVisual",
-			size = UDim2.fromOffset(12, 12),
-			pos = UDim2.new(1, -13, 1, -13),
-			zIndex = 94,
+		-- Visual Resize-Mode Banner Pill at top-center while Resize Mode is ON
+		local resizeBanner = P.button(root, {
+			name = "ResizeModeBanner",
+			size = UDim2.fromOffset(224, 24),
+			pos = UDim2.new(0.5, 0, 0, 42),
+			anchor = Vector2.new(0.5, 0),
+			bg = theme.color.accent,
+			hoverBg = theme.color.accentHover,
+			color = Color3.fromRGB(255, 255, 255),
+			bold = true,
+			text = "⤢ RESIZE ON — Pull/Push Edges (Tap to Lock)",
+			textSize = 10,
+			radius = 12,
+			visible = false,
+			zIndex = 96,
+			onClick = function()
+				win.setResizeMode(false)
+			end,
 		})
-		for gx = 0, 2 do
-			for gy = 0, 2 do
-				if gx + gy >= 2 then
-					P.frame(gripVisual, {
-						size = UDim2.fromOffset(2, 2),
-						pos = UDim2.fromOffset(gx * 4 + 1, gy * 4 + 1),
-						bg = Color3.fromRGB(220, 220, 220),
-						transparency = 0.35,
-						zIndex = 94,
-					})
+		resizeBanner.BackgroundTransparency = 0.05
+
+		local function layoutResizeHandles()
+			local edgeT = win.mobileMode and 14 or 8
+			local cornerS = win.mobileMode and 24 or 16
+			for _, h in ipairs(resizeHandles) do
+				local z = h.zone
+				z.BackgroundColor3 = theme.color.accent
+				if h.isCorner then
+					z.Size = UDim2.fromOffset(cornerS, cornerS)
+					local px = (h.dirX == -1) and UDim.new(0, 0) or UDim.new(1, -cornerS)
+					local py = (h.dirY == -1) and UDim.new(0, 0) or UDim.new(1, -cornerS)
+					z.Position = UDim2.new(px.Scale, px.Offset, py.Scale, py.Offset)
+					z.BackgroundTransparency = 0.12
+				elseif h.dirX ~= 0 then
+					z.Size = UDim2.new(0, edgeT, 1, -cornerS * 2)
+					z.Position = (h.dirX == -1)
+						and UDim2.fromOffset(0, cornerS)
+						or UDim2.new(1, -edgeT, 0, cornerS)
+					z.BackgroundTransparency = 0.35
+				else
+					z.Size = UDim2.new(1, -cornerS * 2, 0, edgeT)
+					z.Position = (h.dirY == -1)
+						and UDim2.fromOffset(cornerS, 0)
+						or UDim2.new(0, cornerS, 1, -edgeT)
+					z.BackgroundTransparency = 0.35
 				end
 			end
 		end
 
 		local function updateResizeVisibility()
-			local allow = not win.maximised
-			for _, h in ipairs(resizeHandles) do h.Visible = allow end
-			gripVisual.Visible = allow
+			local show = win.resizeMode and (not win.maximised)
+			layoutResizeHandles()
+			for _, h in ipairs(resizeHandles) do
+				h.zone.Visible = show
+				h.zone.Active = show
+			end
+			resizeBanner.Visible = show
+			borderStroke.Color = show and theme.color.accent or theme.color.border
+			borderStroke.Thickness = show and 2 or 1
 		end
 
-		local lastTitleClickMs = 0
+		function win.setResizeMode(flag)
+			local nextFlag = flag == true
+			if nextFlag and win.maximised then
+				-- Automatically un-maximize slightly so the player has edges to push/pull!
+				local bounds = responsive.usableRect(6)
+				win.maximised = false
+				config.set("window.maximised", false, { quiet = true })
+				local nw = math.floor(bounds.width * 0.90)
+				local nh = math.floor(bounds.height * 0.88)
+				root.Size = UDim2.fromOffset(nw, nh)
+				root.Position = UDim2.fromOffset(
+					bounds.x + math.floor((bounds.width - nw) * 0.5),
+					bounds.y + math.floor((bounds.height - nh) * 0.5)
+				)
+				if win.onResize then pcall(win.onResize, nw, nh) end
+			end
+			win.resizeMode = nextFlag
+			activeGesture = nil
+			updateResizeVisibility()
+			win.resizeModeChanged:fire(win.resizeMode)
+			return win.resizeMode
+		end
+
+		function win.toggleResizeMode()
+			return win.setResizeMode(not win.resizeMode)
+		end
+
+		local lastTitleClickMs = -1000
+		local lastTitleClickX = -1000
+		local lastTitleClickY = -1000
 
 		function win.bindDragBar(dragSurface)
 			local function isInteractiveDescendant(input)
@@ -246,26 +349,32 @@ return function(env)
 			end
 
 			dragSurface.InputBegan:Connect(function(input)
+				-- While Resize Mode is ON, pause TitleBar move-dragging so pull/push handles never fight moving!
+				if win.resizeMode then return end
 				local kind = input.UserInputType
 				if kind ~= Enum.UserInputType.MouseButton1 and kind ~= Enum.UserInputType.Touch then return end
 				if isInteractiveDescendant(input) then return end
 
 				local nowMs = clock.ms()
-				if nowMs - lastTitleClickMs < 320 then
-					lastTitleClickMs = 0
+				if (nowMs - lastTitleClickMs < 320)
+					and math.abs(input.Position.X - lastTitleClickX) < 6
+					and math.abs(input.Position.Y - lastTitleClickY) < 6 then
+					lastTitleClickMs = -1000
 					win.toggleMaximise()
 					return
 				end
 				lastTitleClickMs = nowMs
+				lastTitleClickX = input.Position.X
+				lastTitleClickY = input.Position.Y
 
 				if win.maximised or win.snappedSide then
-					local bounds = responsive.usableRect(8)
-					local restoreW = preSnapRect and preSnapRect.w or math.floor(bounds.width * 0.8)
-					local restoreH = preSnapRect and preSnapRect.h or math.floor(bounds.height * 0.8)
+					local bounds = responsive.usableRect(6)
+					local restoreW = preSnapRect and preSnapRect.w or math.floor(bounds.width * 0.82)
+					local restoreH = preSnapRect and preSnapRect.h or math.floor(bounds.height * 0.82)
 					win.maximised = false
 					win.snappedSide = nil
 					config.set("window.maximised", false, { quiet = true })
-					local newX = util.clamp(math.floor(input.Position.X - restoreW * 0.5), bounds.x, bounds.x + bounds.width - restoreW)
+					local newX = util.clamp(math.floor(input.Position.X - restoreW * 0.5), bounds.x, math.max(bounds.x, bounds.x + bounds.width - restoreW))
 					local newY = bounds.y
 					root.Size = UDim2.fromOffset(restoreW, restoreH)
 					root.Position = UDim2.fromOffset(newX, newY)
@@ -292,15 +401,25 @@ return function(env)
 				local dx = input.Position.X - activeGesture.startMouse.X
 				local dy = input.Position.Y - activeGesture.startMouse.Y
 
-				if activeGesture.mode == "drag" then
+				if activeGesture.mode == "pillDrag" then
+					if math.abs(dx) >= 6 or math.abs(dy) >= 6 then
+						pillDidDrag = true
+					end
+					if pillDidDrag then
+						local pw = pill.AbsoluteSize.X
+						local ph = pill.AbsoluteSize.Y
+						local px = util.clamp(math.floor(activeGesture.startX + dx), 4, math.max(4, bounds.x + bounds.width - pw - 4))
+						local py = util.clamp(math.floor(activeGesture.startY + dy), 4, math.max(4, bounds.y + bounds.height - ph - 4))
+						pill.Position = UDim2.fromOffset(px, py)
+					end
+				elseif activeGesture.mode == "drag" then
 					local w = root.Size.X.Offset
 					local h = root.Size.Y.Offset
 					local nx = util.clamp(math.floor(activeGesture.startX + dx), bounds.x, math.max(bounds.x, bounds.x + bounds.width - w))
 					local ny = util.clamp(math.floor(activeGesture.startY + dy), bounds.y, math.max(bounds.y, bounds.y + bounds.height - h))
 					root.Position = UDim2.fromOffset(nx, ny)
-				elseif activeGesture.mode == "resize" then
-					local effMinW = math.min(MIN_W, bounds.width)
-					local effMinH = math.min(MIN_H, bounds.height)
+				elseif activeGesture.mode == "resize" and win.resizeMode then
+					local effMinW, effMinH = win.effectiveMinBounds(bounds)
 					local nx = activeGesture.startX
 					local ny = activeGesture.startY
 					local nw = activeGesture.startW
@@ -337,27 +456,35 @@ return function(env)
 
 				local g = activeGesture
 				activeGesture = nil
-				local bounds = responsive.usableRect(8)
+				local bounds = responsive.usableRect(6)
 
 				if g.mode == "drag" then
-					-- Edge Aero-Snap: top = maximize, far left/right = 50% split
-					if input.Position.Y <= bounds.y + SNAP_EDGE then
-						preSnapRect = { w = root.Size.X.Offset, h = root.Size.Y.Offset }
-						win.setMaximised(true)
-						return
-					elseif input.Position.X <= bounds.x + SNAP_EDGE then
-						preSnapRect = { w = root.Size.X.Offset, h = root.Size.Y.Offset }
-						win.snappedSide = "left"
-						win.applyLayout("snap")
-						return
-					elseif input.Position.X >= bounds.x + bounds.width - SNAP_EDGE then
-						preSnapRect = { w = root.Size.X.Offset, h = root.Size.Y.Offset }
-						win.snappedSide = "right"
-						win.applyLayout("snap")
-						return
+					-- Only Aero-Snap on Desktop Mode (on Mobile Mode let players position near edges freely!)
+					if not win.mobileMode then
+						if input.Position.Y <= bounds.y + SNAP_EDGE then
+							preSnapRect = { w = root.Size.X.Offset, h = root.Size.Y.Offset }
+							win.setMaximised(true)
+							return
+						elseif input.Position.X <= bounds.x + SNAP_EDGE then
+							preSnapRect = { w = root.Size.X.Offset, h = root.Size.Y.Offset }
+							win.snappedSide = "left"
+							win.applyLayout("snap")
+							return
+						elseif input.Position.X >= bounds.x + bounds.width - SNAP_EDGE then
+							preSnapRect = { w = root.Size.X.Offset, h = root.Size.Y.Offset }
+							win.snappedSide = "right"
+							win.applyLayout("snap")
+							return
+						end
 					end
 					persistRect()
 					config.saveNow()
+				elseif g.mode == "pillDrag" then
+					if pillDidDrag then
+						task.delay(0.05, function()
+							pillDidDrag = false
+						end)
+					end
 				elseif g.mode == "resize" then
 					config.set("window.customSize", true, { quiet = true })
 					config.set("window.widthScale", root.Size.X.Offset / math.max(1, bounds.width), { quiet = true })
@@ -373,6 +500,10 @@ return function(env)
 				preSnapRect = { w = root.Size.X.Offset, h = root.Size.Y.Offset }
 			end
 			win.maximised = flag == true
+			if win.maximised and win.resizeMode then
+				win.resizeMode = false
+				win.resizeModeChanged:fire(false)
+			end
 			win.snappedSide = nil
 			config.set("window.maximised", win.maximised, { immediate = true })
 			updateResizeVisibility()
@@ -404,6 +535,7 @@ return function(env)
 			win.mobileMode = flag == true
 			pill.Size = flag and UDim2.fromOffset(148, 40) or UDim2.fromOffset(128, 32)
 			pillBrand.Position = UDim2.fromOffset(12, flag and 12 or 8)
+			updateResizeVisibility()
 			win.applyLayout("mobileMode")
 		end
 
@@ -478,8 +610,9 @@ return function(env)
 
 		theme.changed:connect(function()
 			root.BackgroundColor3 = theme.color.editor
-			borderStroke.Color = theme.color.border
 			pill.BackgroundColor3 = theme.color.titleBar
+			resizeBanner.BackgroundColor3 = theme.color.accent
+			updateResizeVisibility()
 		end)
 
 		updateResizeVisibility()

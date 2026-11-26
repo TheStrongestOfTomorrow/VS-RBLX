@@ -48,9 +48,13 @@ return function(env)
 			zIndex = 21,
 		})
 
-		local tabRow = P.frame(header, {
-			size = UDim2.new(1, -116, 1, 0),
-			pos = UDim2.fromOffset(10, 0),
+		local tabRow = P.scroll(header, {
+			name = "PanelHeaderTabs",
+			size = UDim2.new(1, -112, 1, 0),
+			pos = UDim2.fromOffset(6, 0),
+			direction = Enum.ScrollingDirection.X,
+			autoCanvas = Enum.AutomaticSize.X,
+			barThickness = 2,
 			zIndex = 22,
 		})
 		P.list(tabRow, Enum.FillDirection.Horizontal, 8, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
