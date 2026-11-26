@@ -4,10 +4,10 @@ name: "🛡 VS-RBLX Community Extension Gatekeeper"
 # Comments (`issue_comment`) on valid open extension issues are intentionally allowed!
 on:
   issues:
-    types: [opened, edited, reopened]
+    types: [opened, edited, reopened, closed]
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -19,6 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run deterministic 5-template & malware scanner
+        if: github.event.action != 'closed'
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
@@ -26,6 +27,7 @@ jobs:
         run: node .github/scripts/validate_extension_issue.js
 
       - name: Enforce Gatekeeper Verdict (Allow Verified or Auto-Close Invalid/Malicious)
+        if: github.event.action != 'closed'
         uses: actions/github-script@v7
         with:
           script: |
@@ -101,3 +103,60 @@ jobs:
                 }
               }
             }
+
+      - name: Compile Static CDN Marketplace Pages (10/page + Same-Author Sub-Issue SemVer)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const path = require("path");
+            const { resolveExtensionFamily, writeRegistryFiles } = require("./.github/scripts/build_extension_registry.js");
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: "open",
+              labels: "verified-template",
+              per_page: 100,
+            });
+
+            const subIssueIds = new Set();
+            const subMap = new Map();
+            for (const iss of openIssues) {
+              if (iss.pull_request) continue;
+              try {
+                const subRes = await github.request("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+                  owner,
+                  repo,
+                  issue_number: iss.number,
+                });
+                const subs = Array.isArray(subRes.data) ? subRes.data : [];
+                subMap.set(iss.number, subs);
+                for (const s of subs) subIssueIds.add(s.number);
+              } catch (_err) {
+                subMap.set(iss.number, []);
+              }
+            }
+
+            const resolved = [];
+            for (const iss of openIssues) {
+              if (iss.pull_request || subIssueIds.has(iss.number)) continue;
+              const fam = resolveExtensionFamily(iss, subMap.get(iss.number) || []);
+              if (fam.ok) resolved.push(fam);
+            }
+
+            if (resolved.length > 0) {
+              writeRegistryFiles(path.resolve(process.cwd(), "registry"), resolved, `${owner}/${repo}`);
+            }
+
+      - name: Commit Updated Static CDN Registry Pages (if changed)
+        run: |
+          if [ -n "$(git status --porcelain registry/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add registry/
+            git commit -m "chore(registry): rebuild static 10-per-page extension CDN slices [skip ci]"
+            git push origin HEAD:main || true
+          fi
+

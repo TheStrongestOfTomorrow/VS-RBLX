@@ -16,6 +16,8 @@ return function(env)
 
 	function M.new(parent)
 		local activeSubTab = "hub" -- `"hub"` | `"scanner"` | `"system"`
+		local searchQuery = ""
+		local activeTemplateFilter = "all"
 		local scannerText = util.jsonEncode(extensionHub.STARTER_CATALOG[1]) or "{}"
 		local lastScanResult = extensionHub.scanSubmission(scannerText)
 
@@ -163,6 +165,7 @@ return function(env)
 			P.list(actions, Enum.FillDirection.Horizontal, 6, Enum.HorizontalAlignment.Left)
 
 			if scan.ok then
+				local hasUpd = isInst and extensionHub.hasUpdate(extId, manifest.version)
 				local installBtn = P.button(actions, {
 					name = (isInst and "ExtUninstallBtn_" or "ExtInstallBtn_") .. extId,
 					size = UDim2.fromOffset(74, 20),
@@ -182,7 +185,7 @@ return function(env)
 						else
 							local okI, errOrMan = extensionHub.install(manifest)
 							if okI then
-								overlay.toast("🛡 Verified & installed: " .. tostring(manifest.name), "good", 2.4)
+								overlay.toast("🛡 Verified & installed: " .. tostring(manifest.name) .. " v" .. tostring(manifest.version), "good", 2.4)
 								if manifest.template == "theme-pack" then
 									local tid = "ext_" .. extId:gsub("[^%w_]", "_")
 									theme.apply(tid)
@@ -194,6 +197,30 @@ return function(env)
 					end,
 				})
 				installBtn.BackgroundTransparency = 0
+
+				if hasUpd then
+					local updBtn = P.button(actions, {
+						name = "ExtUpdateBtn_" .. extId,
+						size = UDim2.fromOffset(82, 20),
+						bg = theme.color.good,
+						color = Color3.fromRGB(16, 24, 20),
+						bold = true,
+						text = "⬆ v" .. tostring(manifest.version),
+						textSize = 10,
+						radius = 3,
+						order = 2,
+						zIndex = 25,
+						onClick = function()
+							local okU, errU = extensionHub.install(manifest)
+							if okU then
+								overlay.toast("⬆ Updated " .. tostring(manifest.name) .. " to v" .. tostring(manifest.version), "good", 2.4)
+							else
+								overlay.toast(tostring(errU), "bad", 3)
+							end
+						end,
+					})
+					updBtn.BackgroundTransparency = 0
+				end
 			end
 
 			local inspectBtn = P.button(actions, {
@@ -239,11 +266,11 @@ return function(env)
 			end
 
 			if activeSubTab == "hub" then
-				-- Sync Header Banner
+				-- Sync Header + Search + Template Filter Strip
 				ord = ord + 1
 				local syncCard = P.frame(scroll, {
 					name = "HubSyncBanner",
-					size = UDim2.new(1, 0, 0, 56),
+					size = UDim2.new(1, 0, 0, 112),
 					bg = theme.color.sideBarHeader,
 					radius = 5,
 					border = theme.color.border,
@@ -251,11 +278,13 @@ return function(env)
 					zIndex = 23,
 				})
 				P.pad(syncCard, 6, 8, 6, 8)
+				local srcTag = extensionHub.lastSyncSource == "cdn" and " · ⚡ Fastly CDN"
+					or (extensionHub.lastSyncSource == "github_api" and " · Live API" or "")
 				P.label(syncCard, {
-					size = UDim2.new(1, 0, 0, 18),
-					text = "🛡 Locked 5-Template GitHub Issues Hub",
+					size = UDim2.new(1, 0, 0, 16),
+					text = "🛡 5-Template Marketplace (10/page + Sub-Issue SemVer)" .. srcTag,
 					bold = true,
-					textSize = 11,
+					textSize = 10,
 					color = theme.color.good,
 					truncate = true,
 					zIndex = 24,
@@ -263,12 +292,12 @@ return function(env)
 				local syncBtn = P.button(syncCard, {
 					name = "SyncGitHubExtensionsBtn",
 					size = UDim2.new(1, 0, 0, 22),
-					pos = UDim2.fromOffset(0, 22),
+					pos = UDim2.fromOffset(0, 18),
 					bg = theme.color.accent,
 					hoverBg = theme.color.accentHover,
 					color = Color3.fromRGB(255, 255, 255),
 					bold = true,
-					text = "↻ Sync Community Extensions (GitHub Issues)",
+					text = "↻ Sync Marketplace (CDN + Sub-Issues)",
 					textSize = 10,
 					radius = 4,
 					zIndex = 24,
@@ -277,11 +306,86 @@ return function(env)
 						if not list then
 							overlay.toast("Hub sync failed: " .. tostring(err), "bad", 3)
 						else
-							overlay.toast(string.format("Scanned %d GitHub Issue extension(s)", #list), "good", 2.4)
+							overlay.toast(string.format("Loaded %d extension(s) via %s", #list, extensionHub.lastSyncSource), "good", 2.4)
 						end
 					end,
 				})
 				syncBtn.BackgroundTransparency = 0
+
+				local _, sBox = P.input(syncCard, {
+					name = "ExtSearchInput",
+					size = UDim2.new(1, 0, 0, 24),
+					pos = UDim2.fromOffset(0, 44),
+					value = searchQuery,
+					placeholder = "⌕ Filter extensions by name, @author, or id...",
+					zIndex = 24,
+					onCommit = function(val)
+						searchQuery = tostring(val or "")
+						renderView()
+					end,
+				})
+				sBox.FocusLost:Connect(function()
+					if sBox.Text ~= searchQuery then
+						searchQuery = sBox.Text
+						renderView()
+					end
+				end)
+
+				local filterRow = P.scroll(syncCard, {
+					name = "ExtFilterStrip",
+					size = UDim2.new(1, 0, 0, 24),
+					pos = UDim2.fromOffset(0, 72),
+					direction = Enum.ScrollingDirection.X,
+					autoCanvas = Enum.AutomaticSize.X,
+					barThickness = 2,
+					zIndex = 24,
+				})
+				P.list(filterRow, Enum.FillDirection.Horizontal, 4, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+				local filters = {
+					{ id = "all", label = "All" },
+					{ id = "theme-pack", label = "Theme" },
+					{ id = "snippet-pack", label = "Snippets" },
+					{ id = "command-macro", label = "Macro" },
+					{ id = "settings-preset", label = "Preset" },
+					{ id = "toolbar-tool", label = "Tool" },
+				}
+				for fIdx, fl in ipairs(filters) do
+					local isSel = (activeTemplateFilter == fl.id)
+					local fb = P.button(filterRow, {
+						name = "ExtFilter_" .. fl.id,
+						size = UDim2.fromOffset(#fl.label * 6 + 12, 20),
+						bg = isSel and theme.color.accent or theme.color.inputBg,
+						hoverBg = theme.color.hover,
+						color = isSel and Color3.fromRGB(255, 255, 255) or theme.color.sideBarText,
+						bold = isSel,
+						text = fl.label,
+						textSize = 10,
+						radius = 10,
+						order = fIdx,
+						zIndex = 25,
+						onClick = function()
+							activeTemplateFilter = fl.id
+							renderView()
+						end,
+					})
+					fb.BackgroundTransparency = 0
+				end
+
+				local function matchesFilter(item)
+					local man = item.manifest or (item.scan and item.scan.manifest) or {}
+					if activeTemplateFilter ~= "all" and tostring(man.template or "") ~= activeTemplateFilter then
+						return false
+					end
+					local q = util.trim(searchQuery):lower()
+					if q == "" then return true end
+					local hay = table.concat({
+						tostring(man.id or ""),
+						tostring(man.name or item.title or ""),
+						"@" .. tostring(man.author or item.author or ""),
+						tostring(man.summary or ""),
+					}, " "):lower()
+					return hay:find(q, 1, true) ~= nil
+				end
 
 				-- Installed Quick-Tools Bar (`toolbar-tool` extensions)
 				local activeTools = extensionHub.listActiveToolbarTools()
@@ -309,24 +413,56 @@ return function(env)
 					end
 				end
 
-				-- Live Synced GitHub Issues Extensions
+				-- Live Synced Marketplace Feed (10 per page + `[⬇ Load 10 More]`)
 				if #extensionHub.remoteCatalog > 0 then
-					addSection(string.format("GITHUB ISSUES COMMUNITY FEED (%d)", #extensionHub.remoteCatalog))
+					addSection(string.format("MARKETPLACE FEED (%d LOADED · PAGE %d)", #extensionHub.remoteCatalog, math.max(1, extensionHub.currentPage)))
 					for _, rem in ipairs(extensionHub.remoteCatalog) do
+						if matchesFilter(rem) then
+							ord = ord + 1
+							renderExtensionCard(ord, rem)
+						end
+					end
+
+					if extensionHub.hasMorePages then
 						ord = ord + 1
-						renderExtensionCard(ord, rem)
+						local moreBtn = P.button(scroll, {
+							name = "LoadMoreExtensionsBtn",
+							size = UDim2.new(1, 0, 0, 28),
+							bg = theme.color.inputBg,
+							hoverBg = theme.color.accent,
+							color = theme.color.tabActiveText,
+							bold = true,
+							text = string.format("⬇ Load %d More Extensions (Page %d)", extensionHub.PAGE_SIZE, extensionHub.currentPage + 1),
+							textSize = 11,
+							radius = 5,
+							border = theme.color.accent,
+							order = ord,
+							zIndex = 24,
+							onClick = function()
+								local list, err = extensionHub.loadNextPage()
+								if not list then
+									overlay.toast("Failed to load next page: " .. tostring(err), "bad", 3)
+								else
+									overlay.toast(string.format("Loaded %d total extensions", #list), "good", 2)
+								end
+							end,
+						})
+						moreBtn.BackgroundTransparency = 0
 					end
 				end
 
 				-- Verified Official 5-Template Starter Packs
 				addSection("OFFICIAL VERIFIED 5-TEMPLATE PACKS (5)")
 				for _, starter in ipairs(extensionHub.STARTER_CATALOG) do
-					ord = ord + 1
-					renderExtensionCard(ord, {
+					local entry = {
 						manifest = starter,
 						scan = extensionHub.scanSubmission(starter),
 						author = starter.author,
-					})
+					}
+					if matchesFilter(entry) then
+						ord = ord + 1
+						renderExtensionCard(ord, entry)
+					end
 				end
 
 			elseif activeSubTab == "scanner" then

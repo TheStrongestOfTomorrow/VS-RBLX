@@ -58,6 +58,15 @@ return function(env)
 			mode = "unset",
 			promptedOnce = false,
 		},
+		ai = {
+			provider = "local_smart",
+			model = "luau-smart-v2",
+			permissionMode = "ask_first",
+			sidebarVisible = false,
+			sidebarWidth = 285,
+			customEndpoint = "http://127.0.0.1:11434/v1/chat/completions",
+			keys = {},
+		},
 		git = {
 			sideBySideDiff = true,
 			gutterDecorations = true,

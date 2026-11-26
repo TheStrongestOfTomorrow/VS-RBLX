@@ -135,6 +135,7 @@ return function(env)
 	local BLOCKED_SETTING_PREFIXES = {
 		"github.",
 		"vault.",
+		"ai.",
 	}
 
 	local SAFE_TRANSFORMS = {
@@ -745,41 +746,258 @@ return function(env)
 		},
 	}
 
-	-- Fetch live community extension issues from GitHub Issues API & run every one through Malware Scanner!
-	function M.syncFromGitHub(repoOverride)
-		local repo = util.trim(repoOverride or M.hubRepo or DEFAULT_HUB_REPO)
-		if repo == "" then repo = DEFAULT_HUB_REPO end
-		M.hubRepo = repo
+	M.PAGE_SIZE = 10
+	M.currentPage = 0
+	M.hasMorePages = false
+	M.lastSyncSource = "idle" -- `"cdn"` | `"github_api"` | `"disk_cache"`
 
-		local res = http.send({
-			url = string.format("https://api.github.com/repos/%s/issues?state=open&per_page=30", repo),
-			method = "GET",
-			headers = headersUtil.github(github.token(), false),
-		})
-		if not res.ok or type(res.json) ~= "table" then
-			return nil, res.error or ("HTTP " .. tostring(res.status))
+	local function parseSemverTuple(ver)
+		local ma, mi, pa = tostring(ver or ""):match("^(%d+)%.(%d+)%.(%d+)$")
+		if not ma then return 0, 0, 0 end
+		return tonumber(ma) or 0, tonumber(mi) or 0, tonumber(pa) or 0
+	end
+
+	function M.compareSemver(a, b)
+		local a1, a2, a3 = parseSemverTuple(a)
+		local b1, b2, b3 = parseSemverTuple(b)
+		if a1 ~= b1 then return a1 > b1 and 1 or -1 end
+		if a2 ~= b2 then return a2 > b2 and 1 or -1 end
+		if a3 ~= b3 then return a3 > b3 and 1 or -1 end
+		return 0
+	end
+
+	function M.hasUpdate(extId, candidateVer)
+		local inst = M.installed[tostring(extId or "")]
+		if not inst or not candidateVer then return false end
+		return M.compareSemver(candidateVer, inst.version or "0.0.0") > 0
+	end
+
+	-- Resolve a parent GitHub Issue + its GitHub Sub-Issues into the highest verified clean SemVer
+	-- authored by the EXACT same GitHub account (`subAuthor == parentAuthor`)!
+	function M.resolveSubIssueFamily(parentIssue, subIssues)
+		local parentAuthor = (type(parentIssue.user) == "table" and tostring(parentIssue.user.login or "")) or ""
+		local parentScan = M.scanSubmission(parentIssue)
+		if not parentScan.ok or not parentScan.manifest then
+			return {
+				issueNumber = parentIssue.number,
+				title = tostring(parentIssue.title or ("Issue #" .. tostring(parentIssue.number))),
+				author = parentAuthor ~= "" and parentAuthor or "community",
+				htmlUrl = tostring(parentIssue.html_url or ""),
+				comments = tonumber(parentIssue.comments) or 0,
+				scan = parentScan,
+				manifest = parentScan.manifest,
+				rejectedSubIssues = 0,
+			}
 		end
 
-		local entries = {}
-		for _, issue in ipairs(res.json) do
-			if type(issue) == "table" and issue.pull_request == nil then
-				local scan = M.scanSubmission(issue)
-				entries[#entries + 1] = {
-					issueNumber = issue.number,
-					title = tostring(issue.title or ("Issue #" .. tostring(issue.number))),
-					author = (type(issue.user) == "table" and tostring(issue.user.login or "community")) or "community",
-					htmlUrl = tostring(issue.html_url or ""),
-					comments = tonumber(issue.comments) or 0,
+		local baseId = parentScan.manifest.id
+		local baseTmpl = parentScan.manifest.template
+		local bestManifest = parentScan.manifest
+		local bestScan = parentScan
+		local bestVer = tostring(parentScan.manifest.version or "0.0.0")
+		local bestIssueNum = parentIssue.number
+		local bestUrl = tostring(parentIssue.html_url or "")
+		local validCount = 1
+		local rejectedCount = 0
+
+		if type(subIssues) == "table" then
+			for _, sub in ipairs(subIssues) do
+				if type(sub) == "table" and sub.pull_request == nil and (sub.state == nil or sub.state == "open") then
+					local subAuthor = (type(sub.user) == "table" and tostring(sub.user.login or "")) or ""
+					if parentAuthor == "" or subAuthor:lower() ~= parentAuthor:lower() then
+						rejectedCount = rejectedCount + 1
+					else
+						local subScan = M.scanSubmission(sub)
+						if not subScan.ok or not subScan.manifest then
+							rejectedCount = rejectedCount + 1
+						elseif subScan.manifest.id ~= baseId or subScan.manifest.template ~= baseTmpl then
+							rejectedCount = rejectedCount + 1
+						else
+							validCount = validCount + 1
+							local candVer = tostring(subScan.manifest.version or "0.0.0")
+							if M.compareSemver(candVer, bestVer) > 0 then
+								bestVer = candVer
+								bestManifest = subScan.manifest
+								bestScan = subScan
+								bestIssueNum = sub.number or bestIssueNum
+								bestUrl = tostring(sub.html_url or bestUrl)
+							end
+						end
+					end
+				end
+			end
+		end
+
+		bestManifest.author = (parentAuthor ~= "" and parentAuthor) or bestManifest.author or "community"
+		return {
+			issueNumber = bestIssueNum,
+			parentIssueNumber = parentIssue.number,
+			title = tostring(bestManifest.name or parentIssue.title or baseId),
+			author = bestManifest.author,
+			htmlUrl = bestUrl,
+			comments = tonumber(parentIssue.comments) or 0,
+			versionCount = validCount,
+			rejectedSubIssues = rejectedCount,
+			scan = bestScan,
+			manifest = bestManifest,
+		}
+	end
+
+	local function cachePathForPage(repo, page)
+		local slug = tostring(repo):gsub("[^%w_%-]", "_")
+		return string.format("extensions/cache/%s_page_%d.json", slug, page)
+	end
+
+	local function parseCdnPageEntries(pageObj)
+		if type(pageObj) ~= "table" or type(pageObj.items) ~= "table" then return nil end
+		local out = {}
+		for _, item in ipairs(pageObj.items) do
+			local rawManifest = type(item) == "table"
+				and (type(item.manifest) == "table" and item.manifest or (type(item.template) == "string" and item or nil))
+				or nil
+			if rawManifest then
+				local scan = M.scanSubmission(rawManifest)
+				out[#out + 1] = {
+					issueNumber = item.resolvedIssueNumber or item.parentIssueNumber or item.issueNumber,
+					parentIssueNumber = item.parentIssueNumber,
+					title = tostring((scan.manifest and scan.manifest.name) or item.name or item.id or "Extension"),
+					author = tostring(item.issueAuthor or item.author or (scan.manifest and scan.manifest.author) or "community"),
+					htmlUrl = tostring(item.htmlUrl or ""),
+					comments = tonumber(item.comments) or 0,
+					versionCount = type(item.versionHistory) == "table" and #item.versionHistory or 1,
 					scan = scan,
 					manifest = scan.manifest,
 				}
 			end
 		end
+		return out
+	end
 
-		M.remoteCatalog = entries
-		log.info("extensions", string.format("Synced %d community extension issue(s) from %s", #entries, repo))
+	-- CDN-First Paginated Marketplace Loader (`10` items per page, zero `api.github.com` 60/hr limit!)
+	function M.loadMarketplacePage(page, opts)
+		opts = opts or {}
+		local targetPage = math.max(1, math.floor(tonumber(page) or 1))
+		local repo = util.trim(opts.repo or M.hubRepo or DEFAULT_HUB_REPO)
+		if repo == "" then repo = DEFAULT_HUB_REPO end
+		M.hubRepo = repo
+
+		local entries = nil
+		local hasMore = false
+		local sourceUsed = nil
+
+		-- 1. Try Static Fastly CDN (`raw.githubusercontent.com/<repo>/main/registry/page-<N>.json`)
+		-- Note: `raw.githubusercontent.com` serves `.json` with `text/plain` (and `game:HttpGet` omits headers),
+		-- so decode `cdnRes.body` directly when `cdnRes.json` is nil!
+		if opts.preferApi ~= true then
+			local cdnUrl = string.format("https://raw.githubusercontent.com/%s/main/registry/page-%d.json", repo, targetPage)
+			local cdnRes = http.send({ url = cdnUrl, method = "GET" })
+			local pageObj = cdnRes.ok and (cdnRes.json or (type(cdnRes.body) == "string" and util.jsonDecode(cdnRes.body) or nil)) or nil
+			if type(pageObj) == "table" then
+				local parsed = parseCdnPageEntries(pageObj)
+				if parsed then
+					entries = parsed
+					hasMore = pageObj.hasMore == true
+					sourceUsed = "cdn"
+					if type(cdnRes.body) == "string" and cdnRes.body ~= "" then
+						pcall(fsx.write, cachePathForPage(repo, targetPage), cdnRes.body)
+					end
+				end
+			end
+		end
+
+		-- 2. Fallback: Live GitHub Issues + Sub-Issues REST API (`per_page=10&page=<N>`)
+		if not entries then
+			local apiUrl = string.format(
+				"https://api.github.com/repos/%s/issues?state=open&per_page=%d&page=%d",
+				repo,
+				M.PAGE_SIZE,
+				targetPage
+			)
+			local res = http.send({
+				url = apiUrl,
+				method = "GET",
+				headers = headersUtil.github(github.token(), false),
+			})
+			if res.ok and type(res.json) == "table" then
+				entries = {}
+				local rawCount = 0
+				for _, issue in ipairs(res.json) do
+					if type(issue) == "table" and issue.pull_request == nil then
+						rawCount = rawCount + 1
+						local subs = nil
+						if issue.number and opts.resolveSubIssues ~= false then
+							local subRes = http.send({
+								url = string.format("https://api.github.com/repos/%s/issues/%s/sub_issues", repo, tostring(issue.number)),
+								method = "GET",
+								headers = headersUtil.github(github.token(), false),
+							})
+							if subRes.ok and type(subRes.json) == "table" then
+								subs = subRes.json
+							end
+						end
+						entries[#entries + 1] = M.resolveSubIssueFamily(issue, subs)
+					end
+				end
+				hasMore = (rawCount >= M.PAGE_SIZE)
+				sourceUsed = "github_api"
+			end
+		end
+
+		-- 3. Offline Fallback: Executor Disk Cache
+		if not entries then
+			local cachedRaw = fsx.read(cachePathForPage(repo, targetPage))
+			if cachedRaw then
+				local cachedObj = util.jsonDecode(cachedRaw)
+				local parsed = parseCdnPageEntries(cachedObj)
+				if parsed then
+					entries = parsed
+					hasMore = cachedObj.hasMore == true
+					sourceUsed = "disk_cache"
+				end
+			end
+		end
+
+		if not entries then
+			return nil, "Marketplace unreachable (both CDN and GitHub API failed)"
+		end
+
+		if targetPage == 1 or opts.append ~= true then
+			M.remoteCatalog = entries
+		else
+			local seenIds = {}
+			for _, ex in ipairs(M.remoteCatalog) do
+				local idKey = (ex.manifest and ex.manifest.id) or ("issue_" .. tostring(ex.issueNumber))
+				seenIds[idKey] = true
+			end
+			for _, nxt in ipairs(entries) do
+				local idKey = (nxt.manifest and nxt.manifest.id) or ("issue_" .. tostring(nxt.issueNumber))
+				if not seenIds[idKey] then
+					seenIds[idKey] = true
+					M.remoteCatalog[#M.remoteCatalog + 1] = nxt
+				end
+			end
+		end
+
+		M.currentPage = targetPage
+		M.hasMorePages = hasMore
+		M.lastSyncSource = sourceUsed or "cdn"
+		log.info("extensions", string.format("Loaded page %d via %s (%d total items)", targetPage, M.lastSyncSource, #M.remoteCatalog))
 		M.changed:fire("*")
-		return entries
+		return M.remoteCatalog
+	end
+
+	function M.loadNextPage(opts)
+		opts = opts or {}
+		opts.append = true
+		return M.loadMarketplacePage(math.max(1, M.currentPage + 1), opts)
+	end
+
+	-- Fetch live community extension issues (Page 1 via CDN-first -> GitHub Issues + Sub-Issues fallback)
+	function M.syncFromGitHub(repoOverride, opts)
+		opts = opts or {}
+		opts.repo = repoOverride
+		opts.append = false
+		return M.loadMarketplacePage(1, opts)
 	end
 
 	-- Generate a clean, valid sample manifest for any of the 5 allowed templates

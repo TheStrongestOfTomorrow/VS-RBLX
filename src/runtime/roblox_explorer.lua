@@ -268,5 +268,135 @@ return function(env)
 		), "stub"
 	end
 
+	-- Discover RemoteEvent / RemoteFunction / BindableEvent instances across DataModel services
+	function M.listRemotes(limit)
+		local maxOut = limit or 60
+		local found = {}
+
+		local function scanTree(node, depth)
+			if not node or depth > 6 or #found >= maxOut then return end
+			local ok, kids = pcall(function() return node:GetChildren() end)
+			if not ok or type(kids) ~= "table" then return end
+			for _, ch in ipairs(kids) do
+				if #found >= maxOut then return end
+				local cls = ""
+				pcall(function() cls = tostring(ch.ClassName or "") end)
+				if cls == "RemoteEvent" or cls == "RemoteFunction" or cls == "UnreliableRemoteEvent" or cls == "BindableEvent" or cls == "BindableFunction" then
+					found[#found + 1] = {
+						name = tostring(ch.Name or cls),
+						className = cls,
+						luauPath = M.luauPathOf(ch),
+						instance = ch,
+					}
+				end
+				scanTree(ch, depth + 1)
+			end
+		end
+
+		for _, svc in ipairs(M.rootServices()) do
+			scanTree(svc.instance, 1)
+		end
+		return found
+	end
+
+	-- Generate ready-to-run Luau `:FireServer` / `:InvokeServer` / `:Fire` call snippet!
+	function M.generateRemoteSnippet(inst)
+		if not inst then return nil, "No Instance provided" end
+		local cls = ""
+		local nm = ""
+		pcall(function()
+			cls = tostring(inst.ClassName or "")
+			nm = tostring(inst.Name or "Remote")
+		end)
+		local pathExpr = M.luauPathOf(inst)
+
+		if cls == "RemoteFunction" then
+			return table.concat({
+				"-- RemoteFunction Invoke Snippet (" .. nm .. ")",
+				"local remote = " .. pathExpr,
+				"local ok, response = pcall(function()",
+				'\treturn remote:InvokeServer("action")',
+				"end)",
+				"print(ok, response)",
+			}, "\n")
+		elseif cls == "BindableEvent" then
+			return table.concat({
+				"-- BindableEvent Fire Snippet (" .. nm .. ")",
+				"local bindable = " .. pathExpr,
+				'bindable:Fire("eventPayload")',
+			}, "\n")
+		elseif cls == "BindableFunction" then
+			return table.concat({
+				"-- BindableFunction Invoke Snippet (" .. nm .. ")",
+				"local bindableFn = " .. pathExpr,
+				'local res = bindableFn:Invoke("arg1")',
+				"print(res)",
+			}, "\n")
+		else
+			return table.concat({
+				"-- RemoteEvent FireServer Snippet (" .. nm .. ")",
+				"local remote = " .. pathExpr,
+				'remote:FireServer("action", { timestamp = os.clock() })',
+			}, "\n")
+		end
+	end
+
+	-- Type-aware Live Property Tweaker (`number`, `boolean`, `string`, `#RRGGBB` Color3, `x,y,z` Vector3)
+	function M.setPropertyLive(inst, propName, rawText)
+		if not inst or type(propName) ~= "string" or propName == "" then
+			return false, "Invalid instance or property"
+		end
+		if propName == "ClassName" or propName == "Children" or propName == "LuauPath" then
+			return false, propName .. " is read-only"
+		end
+
+		local okCur, curVal = pcall(function() return inst[propName] end)
+		if not okCur then
+			return false, "Cannot read property `" .. propName .. "`"
+		end
+
+		local clean = util.trim(tostring(rawText or ""))
+		local coerced = clean
+		local t = type(curVal)
+
+		if t == "number" then
+			local num = tonumber(clean)
+			if not num then return false, "Expected number for `" .. propName .. "`" end
+			coerced = num
+		elseif t == "boolean" then
+			local low = clean:lower()
+			if low == "true" or low == "1" or low == "yes" then
+				coerced = true
+			elseif low == "false" or low == "0" or low == "no" then
+				coerced = false
+			else
+				return false, "Expected true/false for `" .. propName .. "`"
+			end
+		elseif t == "userdata" or t == "table" then
+			local hex = clean:match("^#?(%x%x%x%x%x%x)$")
+			if hex and Color3 and Color3.fromRGB then
+				local r = tonumber(hex:sub(1, 2), 16)
+				local g = tonumber(hex:sub(3, 4), 16)
+				local b = tonumber(hex:sub(5, 6), 16)
+				coerced = Color3.fromRGB(r, g, b)
+			else
+				local x, y, z = clean:match("^([%+%-]?%d+%.?%d*)%s*,%s*([%+%-]?%d+%.?%d*)%s*,%s*([%+%-]?%d+%.?%d*)$")
+				if x and Vector3 and Vector3.new then
+					coerced = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+				end
+			end
+		else
+			coerced = tostring(rawText or "")
+		end
+
+		local okSet, setErr = pcall(function()
+			inst[propName] = coerced
+		end)
+		if not okSet then
+			return false, tostring(setErr)
+		end
+		return true, tostring(inst[propName])
+	end
+
 	return M
 end

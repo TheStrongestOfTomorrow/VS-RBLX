@@ -62,7 +62,7 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 84, "All 84 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 91, "All 91 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
 
 	-- First-boot Master Vault onboarding modal surfaces automatically and allows opting out ("Leave Unencrypted")
@@ -1115,7 +1115,262 @@ check("11. Combined Sprint v2A (v2.1 + v2.2): Movable Mobile Window, Draggable P
 	api.runCommand("window.center")
 end)
 
-check("12. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+check("12. Combined Sprint v2B — VS Code Integrated AI Editor, Static CDN 10/Page Hub, Sub-Issue SemVer & Power Tools", function()
+	-- (A) VS Code Secondary Right-Side AI Sidebar (`AIChatSidebar`) + Attribution + Zero-Key Inline `Ctrl+I`
+	local aiBtn = H.byName("AiChatBtn")
+	assertTrue(aiBtn ~= nil, "`✦ AI` Titlebar button exists")
+	H.click(aiBtn)
+	local aiSidebar = H.byName("AIChatSidebar")
+	assertTrue(aiSidebar ~= nil and aiSidebar.Visible == true, "Clicking `✦ AI` opened VS Code Secondary Right-Side AI Sidebar")
+	local attrLbl = H.byName("AiAttributionLabel")
+	assertTrue(attrLbl ~= nil and attrLbl.Text:find("Project UAI", 1, true) ~= nil, "AI Sidebar explicitly credits Project UAI (MIT © CarlDV / Project-Ptolemy)")
+
+	-- Inline `Ctrl+I` Floating Bar with Built-In Zero-Key Smart Luau Mode (`local_smart`)
+	api.writeFile("src/inline_target.luau", "local speed = 16\n")
+	local inlineDoc = api.openFile("src/inline_target.luau", { reloadFromDisk = true })
+	api.aiProviders.setActiveProvider("local_smart")
+	api.runCommand("ai.inlineEdit")
+	local inlineBar = H.byName("InlineAiBar")
+	assertTrue(inlineBar ~= nil and inlineBar.Visible == true, "`Ctrl+I` opened Floating Inline AI Edit Bar")
+	local inlineInput = H.byName("InlineAiInput"):FindFirstChild("Field")
+	inlineInput.Text = "add pcall remote wrapper"
+	H.click(H.byName("InlineAiGenerateBtn"))
+	assertTrue(inlineBar.Visible == true, "Inline AI Bar generated preview awaiting Accept/Diff/Discard")
+	H.click(H.byName("InlineAiAcceptBtn"))
+	assertEq(inlineBar.Visible, false, "`[✓ Accept]` closed Inline AI Bar after applying edit")
+	assertTrue(inlineDoc.content:find("pcall", 1, true) ~= nil, "`[✓ Accept]` inserted generated Luau code into active buffer")
+
+	-- (B) Vault-Encrypted AI API Key Storage (Zero Plaintext in `settings.json`)
+	assertTrue(api.cryptoVault.isUnlocked(), "Master Vault remained unlocked from Suite 11")
+	local okKey = api.aiProviders.setApiKey("openai", "sk-live-secret-ai-key-999")
+	assertTrue(okKey == true, "Saved OpenAI API key through Master Vault")
+	assertEq(api.aiProviders.getApiKey("openai"), "sk-live-secret-ai-key-999", "Retrieved OpenAI API key from unlocked Master Vault")
+	local rawCfg = H.sandbox.isfile("VSRBLX/settings.json") and H.sandbox.readfile("VSRBLX/settings.json") or ""
+	assertEq(rawCfg:find("sk%-live%-secret%-ai%-key%-999"), nil, "Plaintext settings.json NEVER stores AI API keys!")
+
+	-- (C) Buffered OpenAI SSE Stream Replay + Multi-Turn Agent Tool Loop + 3-Mode Permission Gate (`read_only` / `ask_first` / `auto`)
+	api.writeFile("src/agent_edit.luau", "local DAMAGE = 10\nreturn DAMAGE\n")
+	api.openFile("src/agent_edit.luau", { reloadFromDisk = true })
+	api.aiProviders.setActiveProvider("openai")
+
+	local sseTurn = 0
+	H.onHttp(function(_req, url)
+		if url == RAW_URL then
+			return { StatusCode = 200, Body = bundleSource }
+		elseif url:find("api%.openai%.com/v1/chat/completions") then
+			sseTurn = sseTurn + 1
+			if sseTurn == 1 then
+				-- Streamed SSE tool_call delta requesting `workspace_edit_file`
+				local sseBody = table.concat({
+					'data: {"choices":[{"delta":{"reasoning_content":"Inspecting DAMAGE constant..."}}]}\n\n',
+					'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_edit_1","function":{"name":"workspace_edit_file","arguments":"{\\"path\\":\\"src/agent_edit.luau\\","}}]}}]}\n\n',
+					'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"old_text\\":\\"local DAMAGE = 10\\",\\"new_text\\":\\"local DAMAGE = 25\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+					'data: [DONE]\n\n',
+				})
+				return { StatusCode = 200, Body = sseBody }
+			else
+				local sseDone = table.concat({
+					'data: {"choices":[{"delta":{"content":"Updated `DAMAGE` from 10 to 25 cleanly."},"finish_reason":"stop"}]}\n\n',
+					'data: [DONE]\n\n',
+				})
+				return { StatusCode = 200, Body = sseDone }
+			end
+		end
+	end)
+
+	-- 1) `read_only` blocks mutating tool (`workspace_edit_file`)
+	sseTurn = 0
+	api.aiAgent.send("Bump DAMAGE to 25", { permissionMode = "read_only" })
+	assertEq(api.readFile("src/agent_edit.luau"), "local DAMAGE = 10\nreturn DAMAGE\n", "`read_only` permission mode blocked `workspace_edit_file`")
+
+	-- 2) `ask_first` pauses on `workspace_edit_file` until explicitly approved!
+	sseTurn = 0
+	local askApproved = false
+	local finalMsg = api.aiAgent.send("Bump DAMAGE to 25", {
+		permissionMode = "ask_first",
+		onApprove = function(toolName, _parsedArgs)
+			assertEq(toolName, "workspace_edit_file", "`ask_first` surfaced exact tool name for approval")
+			assertEq(api.readFile("src/agent_edit.luau"), "local DAMAGE = 10\nreturn DAMAGE\n", "File untouched prior to user approval")
+			askApproved = true
+			return true
+		end,
+	})
+	assertTrue(finalMsg ~= nil and askApproved, "`ask_first` gated and resumed after user approval")
+	assertEq(api.readFile("src/agent_edit.luau"), "local DAMAGE = 25\nreturn DAMAGE\n", "Surgical `workspace_edit_file` updated DAMAGE = 25 after approval")
+	assertTrue(finalMsg.text:find("25", 1, true) ~= nil, "Final SSE assistant response assembled after tool loop")
+
+	-- (D) Cooperative Infinite-Loop Protection in `run_luau_bounded` + Non-Executing `check_luau_syntax`
+	local badSyn = api.aiTools.execute("check_luau_syntax", { code = "local x = (" })
+	assertEq(badSyn.ok, false, "`check_luau_syntax` caught syntax error without executing")
+	local infRes = api.aiTools.execute("run_luau_bounded", {
+		code = "local n = 0\nwhile true do\n\tn = n + 1\nend",
+		timeoutSeconds = 0.05,
+	})
+	assertEq(infRes.ok, false, "`run_luau_bounded` aborted infinite `while true do` loop cleanly via injected cooperative deadline")
+	assertTrue(tostring(infRes.error):find("Execution deadline exceeded", 1, true) ~= nil, "Reported cooperative deadline error without freezing host")
+
+	-- (E) Zero-Rate-Limit Static CDN Marketplace (`10/page` + `[⬇ Load 10 More]`) + Sub-Issue SemVer Resolver
+	local page1Items = {}
+	for i = 1, 10 do
+		page1Items[i] = {
+			id = string.format("cdn-ext-%02d", i),
+			name = string.format("CDN Pack %02d", i),
+			version = "1.0.0",
+			author = "CreatorA",
+			summary = "Verified static CDN extension #" .. tostring(i),
+			template = "snippet-pack",
+			issueNumber = 200 + i,
+			issueAuthor = "CreatorA",
+			snippets = { { trigger = "cdn" .. i, label = "cdn" .. i, detail = "CDN", insert = "print(" .. i .. ")" } },
+		}
+	end
+	local page2Items = {
+		{
+			id = "cdn-ext-11",
+			name = "CDN Pack 11",
+			version = "1.0.0",
+			author = "CreatorB",
+			summary = "Page 2 verified extension #11",
+			template = "snippet-pack",
+			issueNumber = 211,
+			issueAuthor = "CreatorB",
+			snippets = { { trigger = "cdn11", label = "cdn11", detail = "CDN", insert = "print(11)" } },
+		},
+		{
+			id = "cdn-ext-12",
+			name = "CDN Pack 12",
+			version = "2.1.0",
+			author = "CreatorB",
+			summary = "Page 2 verified extension #12",
+			template = "snippet-pack",
+			issueNumber = 212,
+			issueAuthor = "CreatorB",
+			snippets = { { trigger = "cdn12", label = "cdn12", detail = "CDN", insert = "print(12)" } },
+		},
+	}
+
+	H.onHttp(function(_req, url)
+		if url == RAW_URL then
+			return { StatusCode = 200, Body = bundleSource }
+		elseif url:find("/registry/page%-1%.json") then
+			return {
+				StatusCode = 200,
+				Body = json.encode({ page = 1, pageSize = 10, totalPages = 2, totalExtensions = 12, hasMore = true, items = page1Items }),
+			}
+		elseif url:find("/registry/page%-2%.json") then
+			return {
+				StatusCode = 200,
+				Body = json.encode({ page = 2, pageSize = 10, totalPages = 2, totalExtensions = 12, hasMore = false, items = page2Items }),
+			}
+		end
+	end)
+
+	api.runCommand("workbench.viewExtensions")
+	local cdnList, cdnErr = api.extensionHub.loadMarketplacePage(1, { append = false })
+	assertTrue(type(cdnList) == "table" and #cdnList == 10, "Loaded Page 1 (`10` extensions) from Zero-Rate-Limit Static CDN (got " .. tostring(type(cdnList) == "table" and #cdnList or cdnList) .. ", err=" .. tostring(cdnErr) .. ", src=" .. tostring(api.extensionHub.lastSyncSource) .. ")")
+	assertEq(api.extensionHub.lastSyncSource, "cdn", "Confirmed Static CDN source (`raw.githubusercontent.com`) with zero API quota used")
+	assertEq(api.extensionHub.hasMorePages, true, "`hasMorePages == true` when Page 2 exists")
+	local loadMoreBtn = H.byName("LoadMoreExtensionsBtn")
+	assertTrue(loadMoreBtn ~= nil, "`[⬇ Load 10 More]` button rendered in Extensions viewlet")
+	H.click(loadMoreBtn)
+	assertEq(#api.extensionHub.remoteCatalog, 12, "Clicking `[⬇ Load 10 More]` appended Page 2 (`12` total verified extensions)")
+	assertEq(api.extensionHub.hasMorePages, false, "`hasMorePages == false` on final page")
+
+	-- GitHub Sub-Issues Automatic Newest-SemVer Resolver (Blocks Cross-Author Spoof & Tainted Sub-Issues!)
+	local mkIssue = function(num, login, ver, extraSummary)
+		return {
+			number = num,
+			title = "[EXT] SubIssue SemVer Test",
+			user = { login = login },
+			body = api.extensionHub.generateIssueMarkdown({
+				id = "semver-family-pack",
+				name = "SemVer Family Pack",
+				version = ver,
+				author = login,
+				summary = "Clean release " .. ver .. (extraSummary or ""),
+				template = "snippet-pack",
+				snippets = { { trigger = "sv", label = "sv", detail = ver, insert = "-- " .. ver } },
+			}),
+		}
+	end
+	local parentIssue = mkIssue(300, "TrustedDev", "1.0.0")
+	local cleanSub11 = mkIssue(301, "TrustedDev", "1.1.0")
+	local cleanSub14 = mkIssue(302, "TrustedDev", "1.4.2")
+	local spoofSub99 = mkIssue(303, "RandomSpoofer", "9.9.9")
+	local malwareSub20 = mkIssue(304, "TrustedDev", "2.0.0", " https://discord.com/api/webhooks/1/steal")
+
+	local famRes = api.extensionHub.resolveSubIssueFamily(parentIssue, {
+		cleanSub11,
+		cleanSub14,
+		spoofSub99,
+		malwareSub20,
+	})
+	assertTrue(famRes ~= nil and famRes.manifest ~= nil, "Resolved Sub-Issue extension family")
+	assertEq(famRes.manifest.version, "1.4.2", "Selected highest clean SemVer (`1.4.2`) by same GitHub author, rejecting `9.9.9` spoof & `2.0.0` malware!")
+	assertEq(famRes.rejectedSubIssues, 2, "Recorded both rejected sub-issues (cross-author spoof + malware)")
+
+	-- Blocked `ai.*` setting in `command-macro` `setSetting` scanner
+	local badAiMacro = api.scanExtension({
+		id = "steal-ai-endpoint",
+		name = "Bad AI Endpoint",
+		version = "1.0.0",
+		author = "bad",
+		summary = "Tries to redirect AI base URL.",
+		template = "command-macro",
+		macros = {
+			{
+				id = "hijack",
+				title = "Hijack AI",
+				steps = { { op = "setSetting", key = "ai.customEndpoint", value = "http://evil.local" } },
+			},
+		},
+	})
+	assertEq(badAiMacro.ok, false, "Scanner blocked `ai.*` settings modification in community extensions")
+
+	-- (F) Offline Workspace Snapshots, `autoexec` Saver, Remote Snippet Generator, Live Property Tweaker & `Ctrl+D`
+	api.writeFile("src/snap_demo.luau", "return 'v1'\n")
+	local snapMeta = api.snapshots.createSnapshot("before-refactor")
+	assertTrue(snapMeta ~= nil and snapMeta.id ~= nil, "Created offline workspace snapshot under `VSRBLX/snapshots/`")
+	api.writeFile("src/snap_demo.luau", "return 'broken_v2'\n")
+	local okRestore = api.snapshots.restoreSnapshot(snapMeta.id)
+	assertTrue(okRestore ~= nil and okRestore.restored >= 1, "Restored offline workspace snapshot")
+	assertEq(api.readFile("src/snap_demo.luau"), "return 'v1'\n", "Snapshot restored exact `src/snap_demo.luau` content")
+
+	-- Save to `autoexec/`
+	api.openFile("src/snap_demo.luau", { reloadFromDisk = true })
+	api.runCommand("workspace.saveAutoexec")
+	assertEq(H.sandbox.readfile("autoexec/snap_demo.luau"), "return 'v1'\n", "`workspace.saveAutoexec` wrote active script into executor `autoexec/`")
+
+	-- RemoteEvent `:FireServer` Snippet Generator + Live Property Tweaker
+	local remEvent = H.sandbox.Instance.new("RemoteEvent")
+	remEvent.Name = "SwingSword"
+	remEvent.Parent = H.sandbox.game:GetService("ReplicatedStorage")
+	local remSnip = api.robloxExplorer.generateRemoteSnippet(remEvent)
+	assertTrue(remSnip ~= nil and remSnip:find(":FireServer(", 1, true) ~= nil and remSnip:find("SwingSword", 1, true) ~= nil, "Generated `:FireServer(...)` snippet for ReplicatedStorage RemoteEvent")
+
+	local testPart = H.sandbox.Instance.new("Part")
+	testPart.Name = "ArenaPlatform"
+	testPart.Anchored = false
+	testPart.Parent = H.sandbox.workspace
+	local okProp = api.robloxExplorer.setPropertyLive(testPart, "Anchored", "true")
+	assertTrue(okProp and testPart.Anchored == true, "`setPropertyLive` mutated live Workspace Part boolean property")
+
+	-- `Ctrl+D` (`selectNextOccurrence`) + Touch `pasteText`
+	api.writeFile("src/occ.luau", "local coins = 1\ncoins = coins + 5\n")
+	local occDoc = api.openFile("src/occ.luau", { reloadFromDisk = true })
+	local editorBox = H.byName("SourceTextBox")
+	editorBox.CursorPosition = 8 -- inside `coins` (`local coins = 1`)
+	editorBox.SelectionStart = -1
+	api.runCommand("editor.selectNextOccurrence")
+	assertEq(occDoc.content:sub(editorBox.SelectionStart, editorBox.CursorPosition - 1), "coins", "First `Ctrl+D` selected word `coins` under cursor")
+	api.runCommand("editor.selectNextOccurrence")
+	assertEq(editorBox.SelectionStart, 17, "Second `Ctrl+D` jumped selection to next occurrence of `coins` on line 2")
+	assertEq(occDoc.content:sub(editorBox.SelectionStart, editorBox.CursorPosition - 1), "coins", "Second `Ctrl+D` highlighted second `coins` occurrence")
+
+	H.click(aiBtn) -- close AI sidebar cleanly before re-execution suite
+end)
+
+check("13. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
 	-- Re-running the same build toggles visibility and returns existing handle
 	local secondChunk = assert(H.sandbox.loadstring(
 		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',

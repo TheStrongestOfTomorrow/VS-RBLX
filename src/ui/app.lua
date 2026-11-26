@@ -15,6 +15,7 @@ return function(env)
 	local tabsMod = env.require("ui/code/tabs")
 	local breadcrumbsMod = env.require("ui/code/breadcrumbs")
 	local editorMod = env.require("ui/code/editor")
+	local inlineAiMod = env.require("ui/code/inline_ai")
 	local previewPaneMod = env.require("ui/code/preview_pane")
 	local splitterMod = env.require("ui/code/splitter")
 	local terminalMod = env.require("ui/code/terminal")
@@ -27,6 +28,7 @@ return function(env)
 	local settingsPanel = env.require("ui/panels/settings")
 	local githubConnect = env.require("ui/panels/github_connect")
 	local vaultModal = env.require("ui/panels/vault_modal")
+	local aiChatMod = env.require("ui/panels/ai_chat")
 
 	local util = env.require("runtime/util")
 	local dispose = env.require("runtime/dispose")
@@ -128,6 +130,8 @@ return function(env)
 		local zenMode = config.get("workbench.zenMode", false) == true
 		local preZenState = nil
 		local previewOpen = false
+		local aiSidebarVisible = config.get("ai.sidebarVisible", false) == true
+		local aiSidebarWidth = util.clamp(tonumber(config.get("ai.sidebarWidth", 285)) or 285, 220, 420)
 		local mobileMode = tostring(config.get("mobile.mode", "auto")) == "on"
 		local drawerOpen = false
 
@@ -267,6 +271,19 @@ return function(env)
 			zIndex = 12,
 		})
 		local primaryEditor = editorMod.new(primaryBody, "primary")
+		local inlineAi = inlineAiMod.new(primaryBody, function()
+			return primaryEditor.box
+		end)
+
+		-- VS Code Secondary AI Sidebar (docked on the Right side of WorkbenchBody!)
+		local aiChatPanel = aiChatMod.new(workbenchBody, {
+			onClose = function()
+				aiSidebarVisible = false
+				config.set("ai.sidebarVisible", false, { immediate = true })
+				if titleBar.setAiOpen then titleBar.setAiOpen(false) end
+				if reflowWorkbench then reflowWorkbench() end
+			end,
+		})
 
 		-- Secondary Split Editor Group (`Ctrl+\`)
 		local secondaryGroup = P.frame(editorsRegion, {
@@ -391,6 +408,16 @@ return function(env)
 			local effActW = showAct and ACT_W or 0
 			local mainAvailW = winW
 
+			local showAi = (not zenMode) and aiSidebarVisible
+			local effAiW = showAi and math.min(aiSidebarWidth, math.max(200, math.floor(winW * 0.44))) or 0
+			aiChatPanel.root.Visible = showAi
+			if titleBar.setAiOpen then titleBar.setAiOpen(showAi) end
+			if showAi then
+				aiChatPanel.root.ZIndex = mobileMode and 54 or 20
+				aiChatPanel.root.Size = UDim2.new(0, effAiW, 1, 0)
+				aiChatPanel.root.Position = UDim2.new(1, -effAiW, 0, 0)
+			end
+
 			if mobileMode then
 				-- Acode Slide-Over Drawer mode: overlays on top of the editor when `drawerOpen == true`
 				local drawerW = math.min(290, math.max(200, winW - 36))
@@ -406,8 +433,8 @@ return function(env)
 				sideSash.Visible = false
 
 				mainArea.Position = UDim2.fromOffset(0, 0)
-				mainArea.Size = UDim2.fromScale(1, 1)
-				mainAvailW = winW
+				mainArea.Size = UDim2.new(1, -effAiW, 1, 0)
+				mainAvailW = math.max(180, winW - effAiW)
 			else
 				drawerBackdrop.Visible = false
 				drawerNav.Visible = false
@@ -429,8 +456,8 @@ return function(env)
 
 				local leftOffset = effActW + effSideW
 				mainArea.Position = UDim2.fromOffset(leftOffset, 0)
-				mainArea.Size = UDim2.new(1, -leftOffset, 1, 0)
-				mainAvailW = math.max(180, winW - leftOffset)
+				mainArea.Size = UDim2.new(1, -(leftOffset + effAiW), 1, 0)
+				mainAvailW = math.max(180, winW - leftOffset - effAiW)
 			end
 
 			local showQuickBar = mobileMode and (config.get("mobile.quickKeys", true) ~= false)
@@ -632,6 +659,7 @@ return function(env)
 			if primaryEditor.setTransparency then primaryEditor.setTransparency(bgTrans) end
 			if secondaryEditor.setTransparency then secondaryEditor.setTransparency(bgTrans) end
 			if previewPane.setTransparency then previewPane.setTransparency(bgTrans) end
+			if aiChatPanel.setTransparency then aiChatPanel.setTransparency(bgTrans) end
 			if mobileQuickBar.setTransparency then mobileQuickBar.setTransparency(bgTrans) end
 			if bottomTerminal.setTransparency then bottomTerminal.setTransparency(bgTrans) end
 		end
@@ -917,6 +945,86 @@ return function(env)
 			end)
 			reg("editor.selectWord", "Select Word at Cursor", "Selection", "Ctrl+D", function()
 				return focusedEditor().runAction("selectWord")
+			end)
+			reg("editor.selectNextOccurrence", "Select Next Matching Occurrence", "Selection", nil, function()
+				return focusedEditor().runAction("selectNextOccurrence")
+			end)
+			reg("editor.touchCopy", "Touch Copy Selection or Current Line", "Edit", nil, function()
+				local okC, copied = focusedEditor().runAction("copySelectionOrLine")
+				if okC and copied then
+					overlay.toast("📋 Copied to clipboard", "good", 1.6)
+				end
+				return okC, copied
+			end)
+			reg("editor.touchPaste", "Touch Paste Latest Clipboard Entry", "Edit", nil, function()
+				local okP, pasted = focusedEditor().runAction("pasteText")
+				if okP then
+					overlay.toast("📥 Pasted from clipboard", "good", 1.6)
+				end
+				return okP, pasted
+			end)
+
+			reg("ai.toggleChat", "Toggle Integrated AI Secondary Sidebar", "AI", "Ctrl+Alt+I", function()
+				if zenMode then setZenMode(false) end
+				aiSidebarVisible = not aiSidebarVisible
+				config.set("ai.sidebarVisible", aiSidebarVisible, { immediate = true })
+				reflowWorkbench()
+				return aiSidebarVisible
+			end, { "view.ai" })
+
+			reg("ai.inlineEdit", "Open Inline AI Code Editor Bar", "AI", "Ctrl+I", function(prefill)
+				return inlineAi.toggle(prefill)
+			end)
+
+			reg("ai.openKeys", "Configure AI Provider & API Key...", "AI", nil, function()
+				aiChatPanel.openKeyModal()
+			end)
+
+			reg("workspace.createSnapshot", "Create Offline Workspace Snapshot Checkpoint", "Workspace", nil, function(label)
+				local snap, err = tools.snapshots.createSnapshot(label)
+				if snap then
+					overlay.toast(string.format("📸 Saved snapshot: %s (%d files)", snap.label, snap.fileCount), "good", 2.5)
+				else
+					overlay.toast("Snapshot failed: " .. tostring(err), "bad", 3)
+				end
+				return snap, err
+			end)
+
+			reg("workspace.restoreSnapshot", "Restore Workspace Snapshot...", "Workspace", nil, function(snapId)
+				if type(snapId) == "string" and snapId ~= "" then
+					return tools.snapshots.restoreSnapshot(snapId)
+				end
+				local list = tools.snapshots.list()
+				if #list == 0 then
+					overlay.toast("No saved workspace snapshots yet", "info", 2.2)
+					return nil
+				end
+				local items = {}
+				for _, s in ipairs(list) do
+					local sid, slbl = s.id, s.label
+					items[#items + 1] = {
+						label = "📸 " .. tostring(slbl),
+						shortcut = tostring(s.fileCount or 0) .. " files",
+						onClick = function()
+							local res = tools.snapshots.restoreSnapshot(sid)
+							if res then
+								overlay.toast("Restored snapshot: " .. tostring(slbl), "good", 2.4)
+							end
+						end,
+					}
+				end
+				overlay.dropdown(240, 64, items, 280)
+				return list
+			end)
+
+			reg("workspace.saveAutoexec", "Save Active Luau Script to Executor autoexec/", "Workspace", nil, function(customName)
+				local res, err = tools.snapshots.saveActiveToAutoexec(customName)
+				if res then
+					overlay.toast("⚡ Saved to " .. tostring(res.path), "good", 2.5)
+				else
+					overlay.toast("autoexec save failed: " .. tostring(err), "bad", 3)
+				end
+				return res, err
 			end)
 			reg("editor.selectLine", "Select Entire Line", "Selection", "Ctrl+L", function()
 				return focusedEditor().runAction("selectLine")
@@ -1418,6 +1526,8 @@ return function(env)
 			secondaryEditor = secondaryEditor,
 			previewPane = previewPane,
 			previewEngine = previewEngine,
+			aiChat = aiChatPanel,
+			inlineAi = inlineAi,
 			mobileQuickBar = mobileQuickBar,
 			terminal = bottomTerminal,
 			selectViewlet = selectViewlet,
@@ -1426,6 +1536,7 @@ return function(env)
 			setMobileMode = setMobileMode,
 			isMobileMode = function() return mobileMode end,
 			isPreviewOpen = function() return previewOpen and previewPane.root.Visible end,
+			isAiSidebarOpen = function() return aiSidebarVisible and aiChatPanel.root.Visible end,
 		}
 	end
 

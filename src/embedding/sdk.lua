@@ -27,6 +27,10 @@ return function(env)
 	local terminalCmds = env.require("tools/terminal_cmds")
 	local instancePicker = env.require("tools/instance_picker")
 	local projectBundler = env.require("tools/project_bundler")
+	local snapshots = env.require("tools/snapshots")
+	local aiProviders = env.require("ai/providers")
+	local aiTools = env.require("ai/tools")
+	local aiAgent = env.require("ai/agent_loop")
 
 	local M = {}
 
@@ -63,6 +67,11 @@ return function(env)
 			terminal = terminalCmds,
 			instancePicker = instancePicker,
 			bundler = projectBundler,
+			snapshots = snapshots,
+			aiProviders = aiProviders,
+			aiTools = aiTools,
+			aiAgent = aiAgent,
+			ai = aiAgent,
 			git = gitState,
 			github = githubSync,
 			theme = theme,

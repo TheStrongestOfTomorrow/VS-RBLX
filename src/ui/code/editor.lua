@@ -1232,6 +1232,26 @@ return function(env)
 				if word ~= "" then clipboard.push(word) end
 				drawVisibleLines()
 				return true, word
+			elseif actionName == "selectNextOccurrence" then
+				local nextCur, nextSel, matched = editorActions.selectNextOccurrence(currentDoc.content, cur, sel)
+				box.SelectionStart = nextSel
+				box.CursorPosition = nextCur
+				codeStore.setCursor(currentDoc.id, nextCur, nextSel)
+				drawVisibleLines()
+				return true, matched
+			elseif actionName == "pasteText" then
+				local clipTxt = tostring(arg or clipboard.latest() or "")
+				if clipTxt == "" then return false end
+				local lo = (sel > 0 and sel ~= cur) and math.min(sel, cur) or cur
+				local hi = (sel > 0 and sel ~= cur) and math.max(sel, cur) or cur
+				local updated = currentDoc.content:sub(1, lo - 1) .. clipTxt .. currentDoc.content:sub(hi)
+				local afterCur = lo + #clipTxt
+				codeStore.updateContent(currentDoc.id, updated)
+				box.Text = updated
+				box.SelectionStart = -1
+				box.CursorPosition = afterCur
+				codeStore.setCursor(currentDoc.id, afterCur, -1)
+				return true, clipTxt
 			elseif actionName == "selectLine" then
 				local s, e = editorActions.lineBoundsAtCursor(currentDoc.content, cur)
 				box.SelectionStart = s

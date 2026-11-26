@@ -1,0 +1,193 @@
+{
+  "schema": 1,
+  "repo": "TheStrongestOfTomorrow/VS-RBLX",
+  "page": 1,
+  "pageSize": 10,
+  "totalPages": 1,
+  "totalExtensions": 5,
+  "hasMore": false,
+  "generatedAt": "2026-11-26T07:20:27.944Z",
+  "items": [
+    {
+      "ok": true,
+      "id": "tokyo-cyberpunk-neon",
+      "parentIssueNumber": 1,
+      "resolvedIssueNumber": 1,
+      "author": "vs-rblx-core",
+      "latestVersion": "1.1.0",
+      "versionHistory": [
+        {
+          "version": "1.1.0",
+          "issueNumber": 1
+        }
+      ],
+      "htmlUrl": "https://github.com/TheStrongestOfTomorrow/VS-RBLX/issues",
+      "comments": 0,
+      "manifest": {
+        "id": "tokyo-cyberpunk-neon",
+        "name": "Tokyo Cyberpunk Neon",
+        "version": "1.1.0",
+        "author": "vs-rblx-core",
+        "template": "theme-pack",
+        "summary": "Electric cyan & magenta dark theme — strictly hex color tokens.",
+        "theme": {
+          "base": "tokyo_night",
+          "colors": {
+            "editor": "#0d0f1a",
+            "sideBar": "#090b14",
+            "titleBar": "#070810",
+            "statusBar": "#ec4899",
+            "accent": "#06b6d4",
+            "accentHover": "#22d3ee"
+          },
+          "syntax": {
+            "keyword": "#f472b6",
+            "function": "#22d3ee",
+            "string": "#a3e635"
+          }
+        }
+      }
+    },
+    {
+      "ok": true,
+      "id": "roblox-datastore-snippets",
+      "parentIssueNumber": 2,
+      "resolvedIssueNumber": 2,
+      "author": "vs-rblx-core",
+      "latestVersion": "1.0.0",
+      "versionHistory": [
+        {
+          "version": "1.0.0",
+          "issueNumber": 2
+        }
+      ],
+      "htmlUrl": "https://github.com/TheStrongestOfTomorrow/VS-RBLX/issues",
+      "comments": 0,
+      "manifest": {
+        "id": "roblox-datastore-snippets",
+        "name": "Roblox DataStore & Network Snippets",
+        "version": "1.0.0",
+        "author": "vs-rblx-core",
+        "template": "snippet-pack",
+        "summary": "Safe pcall DataStore & RemoteEvent boilerplate snippets with $0 cursor stops.",
+        "snippets": [
+          {
+            "prefix": "pcallds",
+            "label": "pcallds (Safe DataStore GetAsync)",
+            "detail": "Snippet · DataStore pcall",
+            "body": "local ok, data = pcall(function()\n\treturn DataStore:GetAsync($0)\nend)"
+          }
+        ]
+      }
+    },
+    {
+      "ok": true,
+      "id": "luau-header-banner",
+      "parentIssueNumber": 3,
+      "resolvedIssueNumber": 3,
+      "author": "vs-rblx-core",
+      "latestVersion": "1.0.0",
+      "versionHistory": [
+        {
+          "version": "1.0.0",
+          "issueNumber": 3
+        }
+      ],
+      "htmlUrl": "https://github.com/TheStrongestOfTomorrow/VS-RBLX/issues",
+      "comments": 0,
+      "manifest": {
+        "id": "luau-header-banner",
+        "name": "Luau File Header & Timestamp Macro",
+        "version": "1.0.0",
+        "author": "vs-rblx-core",
+        "template": "command-macro",
+        "summary": "Adds a Palette command that prepends a clean module doc-comment header.",
+        "commands": [
+          {
+            "id": "prependHeader",
+            "title": "Insert Module Header Comment",
+            "action": "prependText",
+            "text": "--!strict\n-- Module maintained in VS-RBLX\n\n"
+          }
+        ]
+      }
+    },
+    {
+      "ok": true,
+      "id": "ergonomic-keymap-preset",
+      "parentIssueNumber": 4,
+      "resolvedIssueNumber": 4,
+      "author": "vs-rblx-core",
+      "latestVersion": "1.0.0",
+      "versionHistory": [
+        {
+          "version": "1.0.0",
+          "issueNumber": 4
+        }
+      ],
+      "htmlUrl": "https://github.com/TheStrongestOfTomorrow/VS-RBLX/issues",
+      "comments": 0,
+      "manifest": {
+        "id": "ergonomic-keymap-preset",
+        "name": "Ergonomic Luau Keymap Preset",
+        "version": "1.0.0",
+        "author": "vs-rblx-core",
+        "template": "keymap-preset",
+        "summary": "Declarative keyboard bindings for quick Zen Mode, Problems, and AI Chat.",
+        "keymap": {
+          "bindings": [
+            {
+              "key": "F9",
+              "command": "view.problems"
+            },
+            {
+              "key": "F10",
+              "command": "ai.toggleChat"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "ok": true,
+      "id": "luau-text-transforms",
+      "parentIssueNumber": 5,
+      "resolvedIssueNumber": 5,
+      "author": "vs-rblx-core",
+      "latestVersion": "1.0.0",
+      "versionHistory": [
+        {
+          "version": "1.0.0",
+          "issueNumber": 5
+        }
+      ],
+      "htmlUrl": "https://github.com/TheStrongestOfTomorrow/VS-RBLX/issues",
+      "comments": 0,
+      "manifest": {
+        "id": "luau-text-transforms",
+        "name": "Luau Text Utilities (Sort / Trim / pcall)",
+        "version": "1.0.0",
+        "author": "vs-rblx-core",
+        "template": "toolbar-tool",
+        "summary": "Declarative text transforms: Sort Lines A-Z, Trim Trailing Spaces, Wrap in pcall.",
+        "tools": [
+          {
+            "id": "sortLines",
+            "label": "AZ Sort Lines",
+            "transform": "sortLines"
+          },
+          {
+            "id": "trimLines",
+            "label": "✂ Trim Spaces",
+            "transform": "trimLines"
+          },
+          {
+            "id": "wrapPcall",
+            "label": "🛡 Wrap pcall",
+            "transform": "wrapPcall"
+          }
+        ]
+      }
+    }
+  ]
+}

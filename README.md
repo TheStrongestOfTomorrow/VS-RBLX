@@ -47,19 +47,24 @@ For Roblox Studio testing (without executor globals), paste the contents of [`di
 ## Core Features
 
 ### Authentic VS Code Workbench
-- **Title Bar**: VS-RBLX emblem, top dropdown menus (`File`, `Edit`, `View`, `Run`, `GitHub`), centered Command Center search pill (`Ctrl+P`), **Ghost-Coding Opacity Slider (`30%–100%`)**, **Acode Mobile Mode (`📱` / `☰` Drawer)**, **Zen Mode (`Ctrl+Shift+Z`)**, layout toggles, and Minimize / Maximize / Close controls.
+- **Title Bar**: VS-RBLX emblem, top dropdown menus (`File`, `Edit`, `View`, `Run`, `GitHub` — auto-collapsing into phone-safe `≡ Menu` & `⋯` on narrow viewports), centered Command Center search pill (`Ctrl+P`), **`✦ AI` Integrated AI Sidebar toggle (`Ctrl+Alt+I`)**, **`🔐` Zero-Knowledge Master Vault**, **`⤢` Explicit Resize-Mode Toggle (`ON` / `OFF`)**, **Ghost-Coding Opacity Slider (`30%–100%`)**, **Acode Mobile Mode (`📱` / `☰` Drawer)**, **Zen Mode (`Ctrl+Shift+Z`)**, layout toggles, and Minimize / Maximize / Close controls.
+- **VS Code-Style Integrated AI Assistant & `Ctrl+I` Inline Code Editor (`✦ AI`)**:
+  - **Secondary AI Sidebar (`Ctrl+Alt+I`)**: Docked on the right side of the workbench just like VS Code's built-in AI Chat, featuring multi-provider support (**Built-in Zero-Key Smart Luau Mode**, **OpenAI**, **Anthropic Claude**, **OpenRouter**, **DeepSeek**, and **Custom OpenAI-Compatible / Ollama Endpoints**), buffered **SSE stream replay**, `#file` / `#problems` / `#remotes` context pills, **3-Mode Permission Gate (`🛡 Ask First` · `⚡ Auto Edit` · `👁 Read Only`)**, native IDE/Roblox agent tools (`workspace_edit_file`, non-executing `check_luau_syntax`, deadline-guarded `run_luau_bounded`, live `inspect_roblox_tree` & `discover_remotes`), and 1-click **`✓ Apply`** / **`◫ Diff`**.
+  - **Floating `Ctrl+I` Inline Editor Bar**: Trigger inline code generation or selection refactoring directly inside the active code editor with `[✓ Accept]`, `[◫ Diff]`, and `[✕ Discard]`.
+- **Zero-Knowledge Master Vault (`VSRBLX/vault.enc` — `🔐`)**:
+  - Optional first-boot Master Vault Key (`PBKDF2-HMAC-SHA256` + `Encrypt-then-HMAC-SHA256` stream cipher) encrypting GitHub PATs and AI API keys on disk while scrubbing plaintext `settings.json` — unrecoverable without your Master Key, with a 1-click **"Leave Unencrypted"** opt-out if you prefer plain storage.
 - **Live Split Preview Engine (`◫ Preview` — Previewable Languages Only)**:
   - Automatically surfaces **`◫ Preview` (`Open Preview to the Side`)** for previewable languages (`HTML` + live workspace `style.css`, `CSS`, `Markdown`, `JSON`, `YAML`/`TOML`, `SQL`, `Python`, `JavaScript`, and `TypeScript`) and cleanly omits preview UI on non-preview languages (`Luau`, `Rust`, `Go`, `C/C++`, `C#`, `Java`, `Shell`, `Plain Text`).
-- **Mobile "Acode" Mode (Android / Touch Auto-Detect + Play-While-Coding)**:
-  - Automatically detects touch/mobile devices and offers to switch to **Acode Mobile Mode** (or toggle anytime via `📱` in the Title Bar / Command Palette): `☰` slide-over Viewlet drawer, `42px` touch-friendly tabs, **Acode Quick-Keys symbol bar** (`Tab`, `{`, `}`, `(`, `)`, `[`, `]`, `"`, `'`, `=`, `:`, `;`, `↶`, `↷`, `▶ Run`), keyboard-aware viewport scaling, and **`🎮 Play+Code`** split-peek docking so mobile players can play and code simultaneously.
+- **Mobile "Acode" Mode (Android / Touch Auto-Detect + Floating Movable Window + Play-While-Coding)**:
+  - Floating, movable Mobile Mode window (with draggable `VS-RBLX ↗` minimized pill and `⤢` push/pull resize), `☰` slide-over Viewlet drawer, `42px` touch tabs with `‹ ›` scroll & `▾ N` Open Tabs picker, **Acode Quick-Keys bar** (including 1-tap `📋 Copy`, `📥 Paste`, `✦ AI`, `⚡ Autoexec`, symbols, and `▶ Run`), keyboard-aware scaling, and **`🎮 Play+Code`** split-peek docking.
 - **Activity Bar & Side Bar Viewlets**:
-  - **Explorer (`Ctrl+Shift+E`)**: Open Editors, inline file/folder creation & `F2` rename on Local Disk (`writefile`/`readfile`/`makefolder`/`delfile`), **1-Click Standalone Project Bundler (`📦` / `Ctrl+Shift+B`)**, and live **Roblox DataModel Explorer** with **3D/GUI Eyedropper Path Picker (`🎯`)**, Copy Luau Path, Property Inspector, and `decompile()` to disk.
+  - **Explorer (`Ctrl+Shift+E`)**: Open Editors, inline file/folder creation & `F2` rename on Local Disk, **1-Click Standalone Project Bundler (`📦`)**, **Offline Workspace Snapshots (`VSRBLX/snapshots/`)**, **1-Click `autoexec/` Saver**, and live **Roblox DataModel Explorer** with **3D/GUI Eyedropper (`🎯`)**, **Live Property Tweaker**, **RemoteEvent `:FireServer` Snippet Generator**, and `decompile()` to disk.
   - **Search (`Ctrl+Shift+F`)**: Workspace-wide text search & multi-file replace (`Aa` case-sensitive & `[ab]` whole-word toggles).
   - **Source Control · GitHub (`Ctrl+Shift+G`)**: Clone repos, authenticate PATs, switch/create branches (including interactive Status Bar `⎇` branch picker), Stage/Unstage/Discard changes, **2-Pane Side-by-Side & Unified Diff Viewer**, **GitHub Gist Import & Publish**, Commit History, and **Commit & Push** directly to GitHub.
   - **Run & Debug (`Ctrl+Shift+D`)**: Run active Luau buffers (`F5`), stop active tasks, and inspect live Luau Watch Expressions.
   - **Extensions & Security Hub (`Ctrl+Shift+X`)**:
-    - **Locked 5-Template Community Extension Hub**: Syncs verified declarative extensions directly from GitHub Issues (`theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, `toolbar-tool`) with zero arbitrary code execution.
-    - **Built-in Client Malware & Schema Scanner (`🛡 Scanner`)**: Blocks `loadstring`, webhooks, `HttpGet`/`request`, `getgenv`/`hookfunction`, obfuscators, escaped bytecode, and token access; includes 1-click template manifest & GitHub Issue Form generators.
+    - **Zero-Rate-Limit Static CDN Marketplace (`10/page` + `[⬇ Load 10 More]` + Sub-Issue SemVer)**: Compiles verified issues into static `registry/page-N.json` slices served via `raw.githubusercontent.com` Fastly CDN (avoiding GitHub's 60/hr IP rate limit) with search, template filters, and **automatic GitHub Sub-Issue newest-SemVer resolution** (strictly locked to the same GitHub author + `🛡 CLEAN` Malware Scan).
+    - **Built-in Client Malware & Schema Scanner (`🛡 Scanner`)**: Blocks `loadstring`, webhooks, `HttpGet`/`request`, `getgenv`/`hookfunction`, obfuscators, escaped bytecode, and `github.*`/`vault.*`/`ai.*` credential settings.
     - **Host Capabilities, Themes & Languages**: Live Executor Capability Matrix, VS Code Color Themes (+ installed community Theme Packs), and 17 built-in language modes.
   - **Settings (`Ctrl+,`)**: Category filter pills, dropdown option menus, custom toggle-hotkey capture, `Reset`, and live raw `.vsrblx/settings.json` sync.
 - **Monaco-Grade Multi-Tab & Split Code Editor (`Ctrl+\`) + Deep LSP-Style IntelliSense**:
@@ -142,12 +147,19 @@ VS-RBLX/
 ## Building & Testing Offline
 
 ```bash
-# 1. Static syntax & require-graph check across init.lua + all 82 modules
-luajit test/check.lua init.lua src
+# 1. Static syntax & require-graph check across init.lua + all 91 modules
+luajit test/check.lua
 
 # 2. Bundle all modules into dist/vsrblx.lua & dist/vsrblx.localscript.lua
 luajit tools/bundle.lua
 
-# 3. Run the end-to-end headless UI, Disk FS, GitHub HTTP & Window resize test suite
+# 3. Run the end-to-end headless UI, Disk FS, Vault, AI Agent, CDN Hub & Window test suite
 luajit test/run.lua
 ```
+
+---
+
+## Credits & Open-Source Acknowledgments
+
+- **VS-RBLX Integrated AI Agent Engineering**: Clean-room VS Code Secondary Sidebar & `Ctrl+I` Inline Editor built natively for VS-RBLX, with architectural inspiration (buffered executor SSE replay, smallest-complete-change `workspace_edit_file`, 3-tier `Read Only / Ask First / Auto` permission gating, and cooperative loop-deadline Luau execution checkpoints) credited to **[Project UAI (`Project-Ptolemy/ProjectUAI`)](https://github.com/Project-Ptolemy/ProjectUAI)** by **CarlDV / Project-Ptolemy** *(MIT License)*.
+

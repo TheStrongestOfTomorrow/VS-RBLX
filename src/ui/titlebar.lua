@@ -138,6 +138,8 @@ return function(env)
 						{ label = "Toggle Primary Side Bar", shortcut = "Ctrl+B", onClick = function() commands.run("view.toggleSidebar") end },
 						{ label = "Toggle Terminal Panel", shortcut = "Ctrl+J", onClick = function() commands.run("view.togglePanel") end },
 						{ label = "Split Editor Right", shortcut = "Ctrl+\\", onClick = function() commands.run("view.splitEditor") end },
+						{ label = "✦ Toggle Integrated AI Sidebar", shortcut = "Ctrl+Alt+I", onClick = function() commands.run("ai.toggleChat") end },
+						{ label = "✦ Inline AI Code Edit...", shortcut = "Ctrl+I", onClick = function() commands.run("ai.inlineEdit") end },
 						{ label = "⤢ Toggle Resize Mode (ON/OFF)", onClick = function() commands.run("window.toggleResizeMode") end },
 						{ label = "Toggle Minimap", onClick = function() commands.run("view.toggleMinimap") end },
 						{ label = "Capture Toggle Hotkey...", onClick = function() commands.run("workbench.changeToggleKey") end },
@@ -268,6 +270,22 @@ return function(env)
 			zIndex = 33,
 		})
 		P.list(rightCluster, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
+
+		local aiChatBtn = P.button(rightCluster, {
+			name = "AiChatBtn",
+			size = UDim2.fromOffset(32, 22),
+			hoverBg = theme.color.hover,
+			text = "✦ AI",
+			bold = true,
+			textSize = 10,
+			color = theme.color.titleBarText,
+			radius = 4,
+			order = -3,
+			zIndex = 34,
+			onClick = function()
+				commands.run("ai.toggleChat")
+			end,
+		})
 
 		local vaultBtn = P.button(rightCluster, {
 			name = "VaultBtn",
@@ -506,6 +524,8 @@ return function(env)
 					{ label = "Split Editor Right", shortcut = "Ctrl+\\", onClick = function() commands.run("view.splitEditor") end },
 					{ label = "✦ Toggle Zen Mode", onClick = function() commands.run("workbench.toggleZenMode") end },
 					{ separator = true },
+					{ label = "✦ Toggle Integrated AI Sidebar", shortcut = "Ctrl+Alt+I", onClick = function() commands.run("ai.toggleChat") end },
+					{ label = "✦ Inline AI Code Edit...", shortcut = "Ctrl+I", onClick = function() commands.run("ai.inlineEdit") end },
 					{ label = "🔐 Zero-Knowledge Master Vault...", onClick = function() commands.run("vault.open") end },
 				}
 				overlay.dropdown(p.X, p.Y + h + 2, items, 230)
@@ -578,13 +598,13 @@ return function(env)
 
 			local rightW
 			if showFullRight then
-				rightW = 386
+				rightW = 418
 			elseif opacityBtn.Visible then
-				rightW = 278
+				rightW = 310
 			elseif isUltraCompact then
-				rightW = 182
+				rightW = 214
 			else
-				rightW = 212
+				rightW = 244
 			end
 			rightCluster.Size = UDim2.fromOffset(rightW, h)
 			rightCluster.Position = UDim2.new(1, -rightW, 0, 0)
@@ -647,10 +667,16 @@ return function(env)
 			mobileButton = mobileToggleBtn,
 			resizeButton = resizeModeBtn,
 			vaultButton = vaultBtn,
+			aiButton = aiChatBtn,
 			opacityButton = opacityBtn,
 			refresh = refreshTitle,
 			refreshOpacity = refreshOpacityUi,
 			setResizeMode = refreshResizeBtn,
+			setAiOpen = function(flag)
+				aiChatBtn.BackgroundColor3 = flag and theme.color.accent or theme.color.titleBar
+				aiChatBtn.BackgroundTransparency = flag and 0 or 1
+				aiChatBtn.TextColor3 = flag and Color3.fromRGB(255, 255, 255) or theme.color.titleBarText
+			end,
 			reflow = reflowForWidth,
 			setMobileMode = function(flag)
 				mobileMode = flag == true
