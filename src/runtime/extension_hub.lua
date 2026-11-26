@@ -171,7 +171,7 @@ return function(env)
 		flush()
 
 		local jsonText = sections["Manifest JSON"] or ""
-		local fenced = jsonText:match("```json%s*\n(.-)\n```") or jsonText:match("```%s*\n(.-)\n```")
+		local fenced = jsonText:match("```[%w_%-]*%s*(.-)%s*```")
 		if fenced then
 			jsonText = util.trim(fenced)
 		end

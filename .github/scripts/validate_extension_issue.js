@@ -104,7 +104,7 @@ function parseIssueMarkdown(markdown) {
   flush();
 
   let jsonText = sections["Manifest JSON"] || "";
-  const fenced = jsonText.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+  const fenced = jsonText.match(/```[a-zA-Z0-9_-]*\s*([\s\S]*?)```/);
   if (fenced) {
     jsonText = fenced[1].trim();
   }

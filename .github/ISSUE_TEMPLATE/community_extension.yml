@@ -1,7 +1,8 @@
-name: "🧩 Submit Verified Community Extension (5 Allowed Templates Only)"
-description: "Publish a purely declarative Theme, Snippet Pack, Command Macro, Keymap Preset, or Editor Quick-Tool to the VS-RBLX Extension Hub. Any off-topic, blank, or executable/malicious submission is automatically closed by the Security Gatekeeper."
+name: "Submit Community Extension (5 Allowed Templates)"
+description: "Submit a verified declarative Theme, Snippet Pack, Macro, Keymap, or Quick-Tool JSON manifest."
 title: "[EXT] "
-labels: ["community-extension"]
+labels:
+  - "community-extension"
 body:
   - type: markdown
     attributes:
@@ -10,11 +11,11 @@ body:
         > **GitHub Issues on `VS-RBLX` are strictly locked to the 5 Verified Declarative Extension Templates.**
         > Every opened or edited issue is scanned automatically by **GitHub Actions** and again by the **in-client VS-RBLX Malware Scanner**.
         > - **Allowed Templates (`5` only):** `theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, `toolbar-tool`
-        > - **Strictly Forbidden:** `loadstring`, `HttpGet`, `request`, webhooks (`discord.com/api/webhooks`, Slack, Telegram), `getgenv`, `hookfunction`, `writefile`/`delfile`, obfuscators, escaped bytecode, or off-topic bug/chat posts.
-        > - Non-conforming or malicious issues are **automatically closed** (`not_planned`), while comments on verified extension issues remain open for community feedback!
+        > - **Strictly Forbidden:** `loadstring`, `HttpGet`, `request`, webhooks (`discord.com/api/webhooks`, Slack, Telegram), `getgenv`, `hookfunction`, `writefile`/`delfile`, obfuscators, escaped bytecode, or off-topic posts.
+        > - Non-conforming or malicious issues are **automatically closed**, while comments on verified extension issues remain open!
 
   - type: dropdown
-    id: template
+    id: ext_template
     attributes:
       label: "Extension Template"
       description: "Select the exact declarative template your manifest implements."
@@ -31,8 +32,8 @@ body:
     id: ext_id
     attributes:
       label: "Extension ID"
-      description: "Unique lowercase kebab-case identifier (`^[a-z0-9][a-z0-9-_]+$`, max 48 chars). Must match `manifest.id`."
-      placeholder: "solar-flare-theme"
+      description: "Unique lowercase kebab-case identifier (max 48 chars). Must match manifest.id."
+      placeholder: "crimson-midnight-theme"
     validations:
       required: true
 
@@ -40,27 +41,27 @@ body:
     id: display_name
     attributes:
       label: "Display Name"
-      description: "Human-readable extension title (3–64 characters). Must match `manifest.name`."
-      placeholder: "Solar Flare Dark"
+      description: "Human-readable extension title (3-64 characters). Must match manifest.name."
+      placeholder: "Crimson Midnight"
     validations:
       required: true
 
   - type: input
-    id: version
+    id: ext_version
     attributes:
       label: "Version"
-      description: "Strict Semantic Version (`X.Y.Z`). Must match `manifest.version`."
+      description: "Strict Semantic Version (X.Y.Z). Must match manifest.version."
       placeholder: "1.0.0"
       value: "1.0.0"
     validations:
       required: true
 
   - type: textarea
-    id: summary
+    id: ext_summary
     attributes:
       label: "Summary"
       description: "Short plain-text description of what this declarative pack provides (no external links or webhooks)."
-      placeholder: "Warm high-contrast amber & obsidian color theme for VS-RBLX."
+      placeholder: "Deep obsidian and crimson red dark theme for VS-RBLX."
     validations:
       required: true
 
@@ -68,29 +69,29 @@ body:
     id: manifest_json
     attributes:
       label: "Manifest JSON"
-      description: "Paste the pure JSON manifest generated via `Extensions -> 🛡 Scanner -> Copy Issue MD` inside VS-RBLX."
+      description: "Paste pure JSON only (do not wrap in backticks; GitHub wraps it automatically)."
       render: json
       placeholder: |
         {
-          "id": "solar-flare-theme",
-          "name": "Solar Flare Dark",
+          "id": "crimson-midnight-theme",
+          "name": "Crimson Midnight",
           "version": "1.0.0",
           "author": "your-github-username",
-          "summary": "Warm high-contrast amber & obsidian color theme.",
+          "summary": "Deep obsidian and crimson red dark theme for VS-RBLX.",
           "template": "theme-pack",
           "theme": {
             "isLight": false,
             "colors": {
-              "editor": "#12100e",
-              "sideBar": "#181512",
-              "accent": "#ff9f1c",
-              "statusBar": "#ff9f1c"
+              "editor": "#0f0609",
+              "sideBar": "#16090e",
+              "accent": "#fb7185",
+              "statusBar": "#e11d48"
             },
             "syntax": {
-              "keyword": "#ff9f1c",
-              "string": "#2ec4b6",
-              "number": "#ffbf69",
-              "comment": "#6b6257"
+              "keyword": "#fb7185",
+              "string": "#4ade80",
+              "number": "#c084fc",
+              "comment": "#7f5563"
             }
           }
         }
