@@ -59,8 +59,8 @@ return function(env)
 			promptedOnce = false,
 		},
 		ai = {
-			provider = "local_smart",
-			model = "luau-smart-v2",
+			provider = "kilo",
+			model = "kilo-auto/free",
 			permissionMode = "ask_first",
 			sidebarVisible = false,
 			sidebarWidth = 285,

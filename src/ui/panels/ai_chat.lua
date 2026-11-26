@@ -69,7 +69,9 @@ return function(env)
 			pos = UDim2.fromOffset(0, 68),
 			mono = true,
 			value = providers.getApiKey(p.id),
-			placeholder = p.requiresKey and ("sk-... (" .. p.name .. " API Key)") or "Optional API key (not required for this mode)",
+			placeholder = p.requiresKey
+				and ("sk-... (" .. p.name .. " API Key)")
+				or (p.id == "kilo" and "Optional Kilo key (not needed for :free models!)" or "Optional API key (not required for this mode)"),
 			zIndex = 232,
 		})
 
@@ -277,9 +279,10 @@ return function(env)
 			for _, p in ipairs(providers.CATALOG) do
 				for _, modName in ipairs(p.models) do
 					local pid, mName, pLabel = p.id, modName, p.name
+					local badge = p.freeBadge or (p.requiresKey and "API Key" or "Free")
 					items[#items + 1] = {
 						label = pLabel .. " — " .. mName,
-						shortcut = p.requiresKey and "API Key" or "Free/Local",
+						shortcut = badge,
 						onClick = function()
 							providers.setProvider(pid, mName)
 							refreshProviderLabel()
@@ -289,11 +292,25 @@ return function(env)
 			end
 			items[#items + 1] = { separator = true }
 			items[#items + 1] = {
+				label = "↻ Sync Live Kilo Code `:free` Models",
+				shortcut = "No Key",
+				onClick = function()
+					local list, countOrErr = providers.refreshKiloFreeModels()
+					if list then
+						providers.setProvider("kilo", list[1])
+						refreshProviderLabel()
+						overlay.toast(string.format("✓ Synced %d free Kilo Code models!", tonumber(countOrErr) or #list), "good", 2.5)
+					else
+						overlay.toast("Kilo model sync failed: " .. tostring(countOrErr), "bad", 3)
+					end
+				end,
+			}
+			items[#items + 1] = {
 				label = "🔑 Configure API Key / Custom Endpoint...",
 				onClick = function() openApiKeyModal(refreshProviderLabel) end,
 			}
 			local pos = providerBtn.AbsolutePosition
-			overlay.dropdown(pos.X, pos.Y + 26, items, 260)
+			overlay.dropdown(pos.X, pos.Y + 26, items, 290)
 		end)
 		keyBtn.MouseButton1Click:Connect(function()
 			openApiKeyModal(refreshProviderLabel)

@@ -1125,7 +1125,46 @@ check("12. Combined Sprint v2B — VS Code Integrated AI Editor, Static CDN 10/P
 	local attrLbl = H.byName("AiAttributionLabel")
 	assertTrue(attrLbl ~= nil and attrLbl.Text:find("Project UAI", 1, true) ~= nil, "AI Sidebar explicitly credits Project UAI (MIT © CarlDV / Project-Ptolemy)")
 
-	-- Inline `Ctrl+I` Floating Bar with Built-In Zero-Key Smart Luau Mode (`local_smart`)
+	-- Default Out-of-the-Box Provider is Kilo Code (`kilo` · `kilo-auto/free`) with ZERO API key required!
+	assertEq(api.aiProviders.activeProviderId(), "kilo", "Default out-of-the-box AI provider is `kilo` (Kilo Code Free Gateway)")
+	assertEq(api.aiProviders.activeModel(), "kilo-auto/free", "Default Kilo Code model is `kilo-auto/free` auto-router")
+	assertEq(api.aiProviders.getProvider("kilo").requiresKey, false, "Kilo Code `:free` gateway requires NO API key")
+
+	local kiloNoAuthVerified = false
+	H.onHttp(function(req, url)
+		if url == "https://api.kilo.ai/api/gateway/chat/completions" then
+			local hdrs = req and (req.Headers or req.headers) or {}
+			assertEq(hdrs["Authorization"], nil, "Anonymous Kilo Code `:free` request sends NO Authorization header when unkeyed")
+			kiloNoAuthVerified = true
+			return {
+				StatusCode = 200,
+				Body = table.concat({
+					'data: {"choices":[{"delta":{"content":"```luau\\nlocal freeKilo = true\\n```"},"finish_reason":"stop"}]}\n\n',
+					'data: [DONE]\n\n',
+				}),
+			}
+		elseif url == "https://api.kilo.ai/api/gateway/models" then
+			return {
+				StatusCode = 200,
+				Body = json.encode({
+					data = {
+						{ id = "kilo-auto/free", pricing = { prompt = "0", completion = "0" } },
+						{ id = "x-ai/grok-code-fast-1:free", pricing = { prompt = "0", completion = "0" } },
+						{ id = "anthropic/claude-paid-only", pricing = { prompt = "0.000003", completion = "0.000015" } },
+					},
+				}),
+			}
+		end
+	end)
+
+	local kiloReply = api.aiAgent.send("Generate a freeKilo flag")
+	assertTrue(kiloNoAuthVerified and kiloReply ~= nil and kiloReply.codeBlock:find("freeKilo", 1, true) ~= nil, "Kilo Code `kilo-auto/free` answered over SSE with zero API key!")
+
+	local syncedFreeModels = api.aiProviders.refreshKiloFreeModels()
+	assertTrue(type(syncedFreeModels) == "table" and #syncedFreeModels == 2, "Live Kilo `:free` model sync kept 2 free models and filtered out paid model")
+	assertEq(syncedFreeModels[2], "x-ai/grok-code-fast-1:free", "Live Kilo model sync discovered `x-ai/grok-code-fast-1:free`")
+
+	-- Inline `Ctrl+I` Floating Bar with Built-In Offline Smart Luau Mode (`local_smart`)
 	api.writeFile("src/inline_target.luau", "local speed = 16\n")
 	local inlineDoc = api.openFile("src/inline_target.luau", { reloadFromDisk = true })
 	api.aiProviders.setActiveProvider("local_smart")

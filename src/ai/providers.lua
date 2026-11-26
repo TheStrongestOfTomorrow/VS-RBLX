@@ -1,7 +1,7 @@
--- Multi-Provider AI Catalog, Vault-Backed Key Store & Offline Luau Smart Assistant (`src/ai/providers.lua`).
--- Supports OpenAI, Anthropic, OpenRouter, DeepSeek, Custom OpenAI-Compatible Endpoints,
--- plus an instant zero-key Built-in Luau Smart Assistant (`local_smart`) so inline `Ctrl+I`
--- editing and chat work out-of-the-box before configuring an external API key.
+-- Multi-Provider AI Catalog, Kilo Code Zero-Key Free Gateway, Vault-Backed Key Store & Offline Luau Smart Assistant (`src/ai/providers.lua`).
+-- Defaults out-of-the-box to **Kilo Code (`kilo-auto/free`)** so cloud LLM chat, agent tools, and `Ctrl+I`
+-- inline edits work immediately with ZERO API key, ZERO account, and ZERO setup, alongside OpenAI,
+-- Anthropic Claude, OpenRouter, DeepSeek, Custom OpenAI-Compatible Endpoints, and Offline Smart Luau (`local_smart`).
 return function(env)
 	local config = env.require("runtime/config")
 	local cryptoVault = env.require("runtime/crypto_vault")
@@ -13,12 +13,33 @@ return function(env)
 
 	M.CATALOG = {
 		{
+			id = "kilo",
+			name = "Kilo Code (Free · No Key)",
+			wire = "openai",
+			endpoint = "https://api.kilo.ai/api/gateway/chat/completions",
+			fallbackEndpoint = "https://api.kilo.ai/api/openrouter/chat/completions",
+			modelsEndpoint = "https://api.kilo.ai/api/gateway/models",
+			fallbackModelsEndpoint = "https://api.kilo.ai/api/openrouter/models",
+			models = {
+				"kilo-auto/free",
+				"openrouter/free",
+				"nvidia/nemotron-3-ultra-550b-a55b:free",
+				"cohere/north-mini-code:free",
+				"nvidia/nemotron-3-super-120b-a12b:free",
+				"poolside/laguna-s-2.1:free",
+				"stepfun/step-3.7-flash:free",
+			},
+			requiresKey = false,
+			freeBadge = "Free · No Key",
+		},
+		{
 			id = "local_smart",
-			name = "VS-RBLX Smart Luau (No Key Needed)",
+			name = "VS-RBLX Smart Luau (Offline)",
 			wire = "local",
 			endpoint = "",
 			models = { "luau-smart-v2" },
 			requiresKey = false,
+			freeBadge = "Offline",
 		},
 		{
 			id = "openai",
@@ -59,11 +80,12 @@ return function(env)
 			endpoint = "http://127.0.0.1:11434/v1/chat/completions",
 			models = { "qwen2.5-coder:7b", "llama3.1" },
 			requiresKey = false,
+			freeBadge = "Local/Custom",
 		},
 	}
 
 	function M.getProvider(id)
-		local target = tostring(id or config.get("ai.provider", "local_smart"))
+		local target = tostring(id or config.get("ai.provider", "kilo"))
 		for _, p in ipairs(M.CATALOG) do
 			if p.id == target then return p end
 		end
@@ -71,14 +93,14 @@ return function(env)
 	end
 
 	function M.activeProviderId()
-		return M.getProvider(config.get("ai.provider", "local_smart")).id
+		return M.getProvider(config.get("ai.provider", "kilo")).id
 	end
 
 	function M.activeModel()
 		local p = M.getProvider()
 		local saved = tostring(config.get("ai.model", "") or "")
 		if saved ~= "" then return saved end
-		return p.models[1] or "gpt-4o-mini"
+		return p.models[1] or "kilo-auto/free"
 	end
 
 	function M.setProvider(providerId, modelOverride)
@@ -88,6 +110,53 @@ return function(env)
 		return p
 	end
 	M.setActiveProvider = M.setProvider
+
+	local function isZeroPrice(val)
+		if val == nil then return false end
+		local n = tonumber(val)
+		return n ~= nil and n == 0
+	end
+
+	-- Live Kilo Code `:free` Model Pool Sync (zero API key required)
+	function M.refreshKiloFreeModels()
+		local kilo = M.getProvider("kilo")
+		local headers = { ["Accept"] = "application/json" }
+		local optKey = M.getApiKey("kilo")
+		if optKey ~= "" then
+			headers["Authorization"] = "Bearer " .. optKey
+		end
+
+		local res = http.send({ url = kilo.modelsEndpoint, method = "GET", headers = headers, quiet = true })
+		if (not res.ok) and kilo.fallbackModelsEndpoint then
+			res = http.send({ url = kilo.fallbackModelsEndpoint, method = "GET", headers = headers, quiet = true })
+		end
+		local decoded = res.ok and (res.json or (type(res.body) == "string" and util.jsonDecode(res.body) or nil)) or nil
+		if type(decoded) ~= "table" or type(decoded.data) ~= "table" then
+			return nil, string.format("Failed to fetch Kilo models (HTTP %s)", tostring(res.status))
+		end
+
+		local discovered = { "kilo-auto/free" }
+		local seen = { ["kilo-auto/free"] = true }
+		for _, item in ipairs(decoded.data) do
+			if type(item) == "table" and type(item.id) == "string" and item.id ~= "" then
+				local mid = item.id
+				local pricing = type(item.pricing) == "table" and item.pricing or nil
+				local isFree = (mid == "openrouter/free")
+					or (mid:find(":free", 1, true) ~= nil)
+					or (mid:find("/free", 1, true) ~= nil)
+					or (pricing ~= nil and isZeroPrice(pricing.prompt) and isZeroPrice(pricing.completion))
+				if isFree and not seen[mid] then
+					seen[mid] = true
+					discovered[#discovered + 1] = mid
+				end
+			end
+		end
+
+		if #discovered > 1 then
+			kilo.models = discovered
+		end
+		return kilo.models, #kilo.models
+	end
 
 	-- API Keys are stored inside Zero-Knowledge Master Vault (`VSRBLX/vault.enc`) when encrypted!
 	function M.getApiKey(providerId)
@@ -382,17 +451,28 @@ return function(env)
 			headers["Authorization"] = "Bearer " .. apiKey
 		end
 
+		local bodyJson = util.jsonEncode({
+			model = model,
+			messages = oaiMsgs,
+			tools = oaiTools,
+			temperature = 0.2,
+		})
+
 		local res = http.send({
 			url = endpoint,
 			method = "POST",
 			headers = headers,
-			body = util.jsonEncode({
-				model = model,
-				messages = oaiMsgs,
-				tools = oaiTools,
-				temperature = 0.2,
-			}),
+			body = bodyJson,
 		})
+		if (not res.ok) and p.fallbackEndpoint and (res.status == 0 or res.status == 404 or res.status >= 500) then
+			res = http.send({
+				url = p.fallbackEndpoint,
+				method = "POST",
+				headers = headers,
+				body = bodyJson,
+				quiet = true,
+			})
+		end
 		if not res.ok then
 			return nil, string.format("%s HTTP %s: %s", p.name, tostring(res.status), tostring(res.error or res.body or "failed"))
 		end
