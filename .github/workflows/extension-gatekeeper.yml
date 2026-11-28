@@ -1,7 +1,7 @@
 name: "🛡 VS-RBLX Community Extension Gatekeeper"
 
 # Runs ONLY when an issue is opened, edited, or reopened.
-# Comments (`issue_comment`) on valid open extension issues are intentionally allowed!
+# Comments (`issue_comment`) are intentionally not workflow triggers: reviews/discussion stay public, never release records.
 on:
   issues:
     types: [opened, edited, reopened, closed]
@@ -12,19 +12,115 @@ permissions:
 
 jobs:
   verify-extension-issue:
-    name: "Validate 5-Template Schema & Malware Scan"
+    name: "Validate Community Extension or Owner-Authorized Version"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository validator
         uses: actions/checkout@v4
 
-      - name: Run deterministic 5-template & malware scanner
-        if: github.event.action != 'closed'
+      - name: Prevent accepted parent manifest edits from acting as releases
+        id: parent-baseline
+        if: github.event.action == 'edited' && contains(github.event.issue.labels.*.name, 'verified-template') && !contains(github.event.issue.labels.*.name, 'community-extension-version')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const { validateIssue } = require("./.github/scripts/validate_extension_issue.js");
+            const issue = context.payload.issue;
+            const beforeBody = context.payload.changes && context.payload.changes.body && context.payload.changes.body.from;
+            if (typeof beforeBody !== "string") return;
+            const previous = validateIssue(issue.title || "", beforeBody);
+            const current = validateIssue(issue.title || "", issue.body || "");
+            const stable = (value) => JSON.stringify((function sort(v) {
+              if (Array.isArray(v)) return v.map(sort);
+              if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map((key) => [key, sort(v[key])]));
+              return v;
+            })(value));
+            if (previous.ok && previous.manifest && current.ok && current.manifest && stable(previous.manifest) !== stable(current.manifest)) {
+              current.ok = false;
+              current.manifest = null;
+              current.findings.push("The accepted parent manifest is immutable; publish every release through the owner-authorized Version Update form.");
+              fs.writeFileSync("/tmp/gatekeeper-result.json", JSON.stringify(current, null, 2), "utf8");
+              core.setOutput("blocked", "true");
+            }
+
+      - name: Run deterministic extension submission scanner
+        if: github.event.action != 'closed' && steps.parent-baseline.outputs.blocked != 'true' && !startsWith(github.event.issue.title, '[EXT-VERSION]') && !contains(github.event.issue.labels.*.name, 'community-extension-version')
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           GATEKEEPER_OUT: /tmp/gatekeeper-result.json
         run: node .github/scripts/validate_extension_issue.js
+
+      - name: Validate parent-owner version issue and link it as a sub-issue
+        if: github.event.action != 'closed' && (startsWith(github.event.issue.title, '[EXT-VERSION]') || contains(github.event.issue.labels.*.name, 'community-extension-version'))
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const { validateExtensionVersion, parseVersionIssueNumber, compareSemver } = require("./.github/scripts/validate_extension_version.js");
+            const { validateIssue } = require("./.github/scripts/validate_extension_issue.js");
+            const child = context.payload.issue;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            let report;
+            try {
+              const parentNumber = parseVersionIssueNumber(child.body);
+              if (!parentNumber) throw new Error("Parent Extension Issue number is missing or invalid.");
+              const parentRes = await github.rest.issues.get({ owner, repo, issue_number: parentNumber });
+              const parent = parentRes.data;
+              if (parent.pull_request) throw new Error("The parent reference is a pull request, not an extension issue.");
+              const labels = (parent.labels || []).map((item) => typeof item === "string" ? item : item.name);
+              if (!labels.includes("verified-template") || !labels.includes("community-extension")) {
+                throw new Error("Parent must be an open, verified community extension issue.");
+              }
+              if (parent.state !== "open") throw new Error("Parent extension issue is closed.");
+
+              report = validateExtensionVersion({
+                title: child.title,
+                body: child.body || "",
+                author: child.user && child.user.login,
+                parentNumber,
+                parentAuthor: parent.user && parent.user.login,
+                parentTitle: parent.title,
+                parentBody: parent.body || "",
+              });
+              report.kind = "version";
+              let alreadyLinked = false;
+              if (report.ok) {
+                const siblings = await github.paginate("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+                  owner, repo, issue_number: parentNumber, per_page: 100,
+                });
+                alreadyLinked = siblings.some((sibling) => sibling.number === child.number);
+                let highest = validateIssue(parent.title || "", parent.body || "").manifest.version;
+                for (const sibling of siblings) {
+                  const siblingLabels = (sibling.labels || []).map((item) => typeof item === "string" ? item : item.name);
+                  if (!siblingLabels.includes("community-extension-version") || !/^\[EXT-VERSION\]\s+/i.test(String(sibling.title || ""))) continue;
+                  if (sibling.number === child.number || (sibling.user && parent.user && String(sibling.user.login || "").toLowerCase() !== String(parent.user.login || "").toLowerCase())) continue;
+                  const siblingScan = validateIssue(sibling.title || "", sibling.body || "");
+                  if (siblingScan.ok && siblingScan.manifest && siblingScan.manifest.id === report.manifest.id && siblingScan.manifest.template === report.manifest.template && compareSemver(siblingScan.manifest.version, highest) > 0) {
+                    highest = siblingScan.manifest.version;
+                  }
+                }
+                if (compareSemver(report.manifest.version, highest) <= 0) {
+                  report.ok = false;
+                  report.manifest = null;
+                  report.findings.push(`Version must be greater than the highest owner-authorized linked version (${highest}).`);
+                }
+              }
+              if (report.ok && !alreadyLinked) {
+                await github.request("POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+                  owner, repo, issue_number: parentNumber, sub_issue_id: child.id,
+                });
+              }
+            } catch (error) {
+              report = report || { ok: false, malicious: false, findings: [] };
+              report.ok = false;
+              report.manifest = null;
+              report.findings = [...(report.findings || []), `Version authorization/link validation failed: ${error.message}`];
+              report.kind = "version";
+            }
+            fs.writeFileSync("/tmp/gatekeeper-result.json", JSON.stringify(report, null, 2), "utf8");
 
       - name: Enforce Gatekeeper Verdict (Allow Verified or Auto-Close Invalid/Malicious)
         if: github.event.action != 'closed'
@@ -39,13 +135,20 @@ jobs:
 
             if (report.ok && report.manifest) {
               const m = report.manifest;
+              const isVersion = report.kind === "version";
+              const successLabels = isVersion
+                ? ["community-extension-version", "verified-template", `template:${m.template}`]
+                : ["community-extension", "verified-template", `template:${m.template}`];
+              for (const label of successLabels) {
+                try {
+                  await github.rest.issues.createLabel({
+                    owner, repo, name: label, color: "0e8a16",
+                    description: label === "verified-template" ? "Passed the declarative extension schema and security gate." : "Verified community extension workflow marker.",
+                  });
+                } catch (_e) { /* label already exists */ }
+              }
               try {
-                await github.rest.issues.addLabels({
-                  owner,
-                  repo,
-                  issue_number,
-                  labels: ["community-extension", "verified-template", `template:${m.template}`],
-                });
+                await github.rest.issues.addLabels({ owner, repo, issue_number, labels: successLabels });
               } catch (e) {
                 console.log("Label note:", e.message);
               }
@@ -54,18 +157,39 @@ jobs:
                 owner,
                 repo,
                 issue_number,
-                body: [
-                  "### 🛡 VS-RBLX Security Gatekeeper — `VERIFIED CLEAN`",
-                  "",
-                  `- **Extension:** \`${m.name}\` (\`${m.id}\` v\`${m.version}\`)`,
-                  `- **Template:** \`${m.template}\` *(strictly declarative — zero executable code)*`,
-                  "- **Malware & Exfiltration Scan:** Passed (`0` findings)",
-                  "",
-                  "Players can now install this extension in-game via **VS-RBLX → Extensions (`Ctrl+Shift+X`) → ↻ Sync Community Extensions**, and community members are welcome to leave feedback in the comments below!",
-                ].join("\n"),
+                body: isVersion
+                  ? [
+                      "### 🛡 VS-RBLX Version Gatekeeper — `OWNER VERIFIED`",
+                      "",
+                      `- **Extension:** \`${m.name}\` (\`${m.id}\` v\`${m.version}\`)`,
+                      `- **Template:** \`${m.template}\` *(validated declarative manifest)*`,
+                      "- Parent-author check, increasing SemVer, schema, and malware scan passed.",
+                      "- Linked to its parent extension as a version sub-issue. Comments remain ordinary discussion.",
+                      "- Registry publication follows the repository workflow; installing updates remains user-initiated.",
+                    ].join("\n")
+                  : [
+                      "### 🛡 VS-RBLX Security Gatekeeper — `VERIFIED CLEAN`",
+                      "",
+                      `- **Extension:** \`${m.name}\` (\`${m.id}\` v\`${m.version}\`)`,
+                      `- **Template:** \`${m.template}\` *(strictly declarative — zero executable code)*`,
+                      "- **Malware & Exfiltration Scan:** Passed (`0` findings)",
+                      "",
+                      "Players can now install this extension in-game via **VS-RBLX → Extensions (`Ctrl+Shift+X`) → ↻ Sync Community Extensions**, and community members are welcome to leave feedback in the comments below!",
+                    ].join("\n"),
               });
             } else {
               const bullets = (report.findings || []).map((f) => `- ❌ ${f}`).join("\n");
+              const auditLabels = ["extension-rejected", report.malicious ? "extension-malware-flagged" : "extension-review-needed"];
+              for (const label of auditLabels) {
+                try {
+                  await github.rest.issues.createLabel({
+                    owner, repo, name: label,
+                    color: report.malicious ? "b60205" : "fbca04",
+                    description: report.malicious ? "Automated extension scanner flagged malicious behavior." : "Extension validation failed; maintainer review may classify false positives, never bypassing validation.",
+                  });
+                } catch (_e) { /* label may already exist */ }
+              }
+              try { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: auditLabels }); } catch (e) { console.log("Audit label note:", e.message); }
               await github.rest.issues.createComment({
                 owner,
                 repo,
@@ -104,7 +228,7 @@ jobs:
               }
             }
 
-      - name: Compile Static CDN Marketplace Pages (10/page + Same-Author Sub-Issue SemVer)
+      - name: Compile Static CDN Marketplace Pages (10/page + Owner-Verified Version Sub-Issue SemVer)
         uses: actions/github-script@v7
         with:
           script: |
@@ -126,12 +250,12 @@ jobs:
             for (const iss of openIssues) {
               if (iss.pull_request) continue;
               try {
-                const subRes = await github.request("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+                const subs = await github.paginate("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
                   owner,
                   repo,
                   issue_number: iss.number,
+                  per_page: 100,
                 });
-                const subs = Array.isArray(subRes.data) ? subRes.data : [];
                 subMap.set(iss.number, subs);
                 for (const s of subs) subIssueIds.add(s.number);
               } catch (_err) {
@@ -141,7 +265,9 @@ jobs:
 
             const resolved = [];
             for (const iss of openIssues) {
-              if (iss.pull_request || subIssueIds.has(iss.number)) continue;
+              const issueLabels = (iss.labels || []).map((item) => typeof item === "string" ? item : item.name);
+              const isVersionIssue = issueLabels.includes("community-extension-version") || /^\[EXT-VERSION\]\s+/i.test(String(iss.title || ""));
+              if (iss.pull_request || subIssueIds.has(iss.number) || isVersionIssue) continue;
               const fam = resolveExtensionFamily(iss, subMap.get(iss.number) || []);
               if (fam.ok) resolved.push(fam);
             }

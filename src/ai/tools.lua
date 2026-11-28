@@ -6,12 +6,38 @@
 -- Architectural engineering inspired by Project UAI (MIT © CarlDV / Project-Ptolemy).
 return function(env)
 	local workspaceFs = env.require("runtime/workspace_fs")
+	local aiWorkspace = env.require("runtime/ai_workspace")
 	local codeStore = env.require("runtime/code_store")
 	local diagnostics = env.require("runtime/diagnostics")
 	local robloxExplorer = env.require("runtime/roblox_explorer")
 	local util = env.require("runtime/util")
 
 	local M = {}
+	local authorizationThread = ""
+	local authorizedProjects = {}
+
+	function M.setThread(threadId)
+		local id = tostring(threadId or "")
+		if id ~= authorizationThread then
+			authorizationThread = id
+			authorizedProjects = {}
+			if workspaceFs.activeName then authorizedProjects[workspaceFs.activeName] = true end
+		end
+	end
+
+	local function projectAccess(projectName)
+		local name = util.trim(tostring(projectName or workspaceFs.activeName or "default"))
+		if name == "" then name = workspaceFs.activeName or "default" end
+		if name ~= workspaceFs.activeName and not authorizedProjects[name] then
+			return nil, "Project scope is not authorized for this AI conversation. Call workspace_authorize_project and wait for user approval."
+		end
+		if name == workspaceFs.activeName and workspaceFs.rawMode then
+			return name, nil, workspaceFs.diskRootLabel()
+		end
+		local root, cleanOrErr = workspaceFs.projectRoot(name)
+		if not root then return nil, tostring(cleanOrErr) end
+		return name, nil, root
+	end
 
 	-- Rewrite unconditional Luau loop headers (`do` / `repeat`) with cooperative deadline checks
 	-- while leaving string literals and comments completely untouched!
@@ -106,36 +132,119 @@ return function(env)
 
 	M.DEFINITIONS = {
 		{
-			name = "workspace_list_files",
+			name = "workspace_list_available_projects",
 			readOnly = true,
-			description = "List all files in the active VS-RBLX workspace.",
+			description = "List known project workspace names only. This does not authorize access to another project's contents.",
+			parameters = { type = "object", properties = {} },
+			run = function()
+				return { ok = true, active = workspaceFs.activeName, projects = workspaceFs.listWorkspaces() }
+			end,
+		},
+		{
+			name = "workspace_authorize_project",
+			readOnly = false,
+			requiresApproval = true,
+			description = "Request user approval to let this AI conversation read/search a named project workspace. Approval applies to this thread only and grants no write access.",
 			parameters = {
 				type = "object",
-				properties = {},
+				properties = { project = { type = "string", description = "Exact project name returned by workspace_list_available_projects" } },
+				required = { "project" },
 			},
-			run = function()
-				local files = workspaceFs.allFiles("")
-				return { ok = true, count = #files, files = files }
+			run = function(args)
+				local name = util.trim(tostring(args.project or ""))
+				if name == "" then return { ok = false, error = "Project name required" } end
+				local known = false
+				for _, candidate in ipairs(workspaceFs.listWorkspaces()) do
+					if candidate == name then known = true break end
+				end
+				if not known then return { ok = false, error = "Unknown project workspace: " .. name } end
+				local root, err = workspaceFs.projectRoot(name)
+				if not root then return { ok = false, error = tostring(err) } end
+				authorizedProjects[name] = true
+				return { ok = true, project = name, root = root, access = "read-only for this conversation" }
+			end,
+		},
+		{
+			name = "workspace_list_files",
+			readOnly = true,
+			description = "Recursively list files in the active project workspace (bounded to 1200 paths). Use offset to page through results.",
+			parameters = {
+				type = "object",
+				properties = {
+					offset = { type = "number", description = "Zero-based result offset" },
+					limit = { type = "number", description = "Page size (1-300, default 150)" },
+					project = { type = "string", description = "Optional project name; non-active projects require prior user authorization in this conversation" },
+				},
+			},
+			run = function(args)
+				local project, accessErr, projectRoot = projectAccess(args.project)
+				if not project then return { ok = false, error = accessErr } end
+				local files, listErr, listInfo
+				if project == workspaceFs.activeName then
+					files = workspaceFs.allFiles("")
+					projectRoot = workspaceFs.diskRootLabel()
+				else
+					files, listErr, listInfo = workspaceFs.listProjectFiles(project)
+				end
+				if not files then return { ok = false, error = tostring(listErr or "Unable to list project") } end
+				local offset = math.floor(util.clamp(tonumber(args.offset) or 0, 0, #files))
+				local limit = math.floor(util.clamp(tonumber(args.limit) or 150, 1, 300))
+				local page = {}
+				for i = offset + 1, math.min(#files, offset + limit) do page[#page + 1] = files[i] end
+				return {
+					ok = true,
+					workspace = project,
+					root = projectRoot or (listInfo and listInfo.root) or workspaceFs.diskRootLabel(),
+					count = #page,
+					total = #files,
+					truncated = (listInfo and listInfo.truncated) or #files >= 1200,
+					nextOffset = offset + #page < #files and (offset + #page) or nil,
+					files = page,
+				}
 			end,
 		},
 		{
 			name = "workspace_read_file",
 			readOnly = true,
-			description = "Read a file from the active VS-RBLX workspace by relative path.",
+			description = "Read a bounded UTF-8 page from the active project workspace file. Use nextOffset to continue large text files.",
 			parameters = {
 				type = "object",
 				properties = {
 					path = { type = "string", description = "Workspace relative path (e.g. 'src/main.luau')" },
+					offset = { type = "number", description = "Zero-based byte offset returned by the previous page" },
+					max_bytes = { type = "number", description = "Maximum page size (1-65536, default 32768)" },
+					project = { type = "string", description = "Optional named project; requires authorization for non-active projects" },
 				},
 				required = { "path" },
 			},
 			run = function(args)
+				local project, accessErr = projectAccess(args.project)
+				if not project then return { ok = false, error = accessErr } end
 				local path = tostring(args.path or "")
-				local content = workspaceFs.readFile(path)
+				local content, readErr
+				if project == workspaceFs.activeName then content, readErr = workspaceFs.readFile(path)
+				else content, readErr = workspaceFs.readProjectFile(project, path) end
 				if content == nil then
-					return { ok = false, error = "File not found: " .. path }
+					return { ok = false, error = tostring(readErr or ("File not found: " .. path)) }
 				end
-				return { ok = true, path = path, size = #content, content = content }
+				if #content > 8388608 then return { ok = false, error = "File exceeds 8 MB text safety bound" } end
+				if not util.validUtf8(content) then return { ok = false, error = "File is not valid UTF-8 text" } end
+				local start = math.floor(util.clamp(tonumber(args.offset) or 0, 0, #content))
+				while start > 0 and not util.validUtf8(content:sub(1, start)) do start = start - 1 end
+				local maxBytes = math.floor(util.clamp(tonumber(args.max_bytes) or 32768, 1, 65536))
+				local chunk = content:sub(start + 1, start + maxBytes)
+				while #chunk > 0 and not util.validUtf8(chunk) do chunk = chunk:sub(1, -2) end
+				local nextOffset = start + #chunk
+				return {
+					ok = true,
+					path = path,
+					totalBytes = #content,
+					offset = start,
+					bytes = #chunk,
+					truncated = nextOffset < #content,
+					nextOffset = nextOffset < #content and nextOffset or nil,
+					content = chunk,
+				}
 			end,
 		},
 		{
@@ -146,15 +255,25 @@ return function(env)
 				type = "object",
 				properties = {
 					query = { type = "string", description = "Case-insensitive search text" },
+					project = { type = "string", description = "Optional named project; requires authorization for non-active projects" },
 				},
 				required = { "query" },
 			},
 			run = function(args)
+				local project, accessErr = projectAccess(args.project)
+				if not project then return { ok = false, error = accessErr } end
 				local q = tostring(args.query or ""):lower()
 				if q == "" then return { ok = false, error = "Empty query" } end
 				local hits = {}
-				for _, path in ipairs(workspaceFs.allFiles("")) do
-					local body = workspaceFs.readFile(path) or ""
+				local paths
+				if project == workspaceFs.activeName then paths = workspaceFs.allFiles("")
+				else paths = workspaceFs.listProjectFiles(project) end
+				if type(paths) ~= "table" then return { ok = false, error = "Unable to list authorized project files" } end
+				for _, path in ipairs(paths) do
+					local body
+					if project == workspaceFs.activeName then body = workspaceFs.readFile(path)
+					else body = workspaceFs.readProjectFile(project, path) end
+					body = body or ""
 					local lineNo = 0
 					for line in (body .. "\n"):gmatch("([^\n]*)\n") do
 						lineNo = lineNo + 1
@@ -166,6 +285,95 @@ return function(env)
 					if #hits >= 40 then break end
 				end
 				return { ok = true, count = #hits, matches = hits }
+			end,
+		},
+		{
+			name = "ai_workspace_list_files",
+			readOnly = true,
+			description = "List files in the private AI workspace for the active conversation thread, separate from project files and live game.",
+			parameters = {
+				type = "object",
+				properties = {
+					offset = { type = "number", description = "Zero-based result offset" },
+					limit = { type = "number", description = "Page size (1-300, default 150)" },
+				},
+			},
+			run = function(args)
+				local page = aiWorkspace.listFiles(args)
+				page.ok = true
+				return page
+			end,
+		},
+		{
+			name = "ai_workspace_read_file",
+			readOnly = true,
+			description = "Read a file from the private workspace for the active AI conversation thread, separate from project files.",
+			parameters = {
+				type = "object",
+				properties = { path = { type = "string", description = "Path relative to the private AI workspace" } },
+				required = { "path" },
+			},
+			run = function(args)
+				local path = tostring(args.path or "")
+				local content, err = aiWorkspace.readFile(path)
+				if content == nil then return { ok = false, error = tostring(err or "AI workspace file not found") } end
+				return { ok = true, path = path, root = aiWorkspace.rootPath(), bytes = #content, content = content }
+			end,
+		},
+		{
+			name = "ai_workspace_write_file",
+			readOnly = false,
+			description = "Create or overwrite a file in the private workspace for the active AI conversation thread. This never writes to the active project workspace.",
+			parameters = {
+				type = "object",
+				properties = {
+					path = { type = "string", description = "Path relative to the private AI workspace" },
+					content = { type = "string", description = "Full file content (maximum 8 MB)" },
+				},
+				required = { "path", "content" },
+			},
+			run = function(args)
+				local path = tostring(args.path or "")
+				local content = tostring(args.content or "")
+				local ok, err = aiWorkspace.writeFile(path, content)
+				if not ok then return { ok = false, error = tostring(err) } end
+				return { ok = true, path = path, root = aiWorkspace.rootPath(), bytes = #content }
+			end,
+		},
+		{
+			name = "ai_workspace_transfer_to_project",
+			readOnly = false,
+			requiresApproval = true,
+			description = "Explicitly copy one AI artifact into the active project workspace. This is permission-gated; it is never automatic, and destination files are not overwritten unless separately confirmed.",
+			parameters = {
+				type = "object",
+				properties = {
+					source = { type = "string", description = "Source path relative to the private AI workspace" },
+					destination = { type = "string", description = "Destination path relative to the active project" },
+					confirm_transfer = { type = "boolean", description = "Must be true only after the user explicitly requested this transfer" },
+					overwrite_existing = { type = "boolean", description = "Must be true only after the user explicitly approved replacing an existing project file" },
+				},
+				required = { "source", "destination", "confirm_transfer" },
+			},
+			run = function(args)
+				if args.confirm_transfer ~= true then return { ok = false, error = "Explicit user-requested transfer confirmation required" } end
+				local source = tostring(args.source or "")
+				local destination = tostring(args.destination or "")
+				if source == "" or destination == "" then return { ok = false, error = "Source and destination are required" } end
+				local content, readErr = aiWorkspace.readFile(source)
+				if content == nil then return { ok = false, error = tostring(readErr or "AI artifact not found") } end
+				if workspaceFs.readFile(destination) ~= nil and args.overwrite_existing ~= true then
+					return { ok = false, error = "Destination already exists; explicit overwrite approval required" }
+				end
+				local ok, writeErr = workspaceFs.writeFile(destination, content)
+				if not ok then return { ok = false, error = tostring(writeErr or "Project write failed") } end
+				return {
+					ok = true,
+					transferred = true,
+					from = aiWorkspace.rootPath() .. "/" .. source,
+					to = workspaceFs.diskRootLabel() .. "/" .. destination,
+					bytes = #content,
+				}
 			end,
 		},
 		{
@@ -214,41 +422,120 @@ return function(env)
 		{
 			name = "inspect_roblox_tree",
 			readOnly = true,
-			description = "Inspect live Roblox DataModel services or children of a service (e.g. 'Workspace', 'ReplicatedStorage').",
+			description = "Browse the live Roblox DataModel recursively. Start at game or a service, then inspect a returned Luau path. Bounded to protect the client.",
 			parameters = {
 				type = "object",
 				properties = {
-					service = { type = "string", description = "Optional top-level service name (omit for root list)" },
+					service = { type = "string", description = "Optional service name (for example Workspace or ServerStorage)" },
+					path = { type = "string", description = "Optional returned Luau/DataModel path to inspect more deeply" },
+					depth = { type = "number", description = "Tree depth (1-4, default 2)" },
+					limit = { type = "number", description = "Maximum returned instances (1-120, default 60)" },
 				},
 			},
 			run = function(args)
-				local svcName = util.trim(tostring(args.service or ""))
-				if svcName == "" then
-					local roots = {}
-					for _, r in ipairs(robloxExplorer.rootServices()) do
-						roots[#roots + 1] = { name = r.name, className = r.className }
-					end
-					return { ok = true, services = roots }
+				local serviceName = util.trim(tostring(args.service or ""))
+				local path = util.trim(tostring(args.path or ""))
+				if serviceName ~= "" and path ~= "" then
+					return { ok = false, error = "Choose either service or path, not both" }
 				end
-				local target = nil
-				for _, r in ipairs(robloxExplorer.rootServices()) do
-					if r.name:lower() == svcName:lower() then
-						target = r.instance
-						break
-					end
+				local target = env.game
+				if path ~= "" then
+					local resolveErr
+					target, resolveErr = robloxExplorer.resolvePath(path)
+					if not target then return { ok = false, error = tostring(resolveErr or "DataModel path not found") } end
+				elseif serviceName ~= "" then
+					local resolveErr
+					target, resolveErr = robloxExplorer.resolvePath(serviceName)
+					if not target then return { ok = false, error = tostring(resolveErr or ("Service not found: " .. serviceName)) } end
 				end
-				if not target then
-					return { ok = false, error = "Service not found: " .. svcName }
+
+				local maxDepth = math.floor(util.clamp(tonumber(args.depth) or 2, 1, 4))
+				local maxNodes = math.floor(util.clamp(tonumber(args.limit) or 60, 1, 120))
+				local visited = 0
+				local truncated = false
+				local function childCount(inst)
+					local ok, children = pcall(function() return inst:GetChildren() end)
+					return ok and type(children) == "table" and #children or 0
 				end
-				local kids = {}
-				for _, ch in ipairs(robloxExplorer.childrenOf(target, 50)) do
-					kids[#kids + 1] = {
-						name = ch.name,
-						className = ch.className,
-						luauPath = robloxExplorer.luauPathOf(ch.instance),
+				local function buildNode(inst, level)
+					if visited >= maxNodes then truncated = true return nil end
+					visited = visited + 1
+					local name, className, isScript = "?", "Instance", false
+					pcall(function()
+						name = tostring(inst.Name or inst.ClassName or "?")
+						className = tostring(inst.ClassName or "Instance")
+						isScript = inst:IsA("LuaSourceContainer")
+					end)
+					local node = {
+						name = name,
+						className = className,
+						luauPath = robloxExplorer.luauPathOf(inst),
+						isScript = isScript == true,
 					}
+					local totalChildren = childCount(inst)
+					if totalChildren > 0 and level < maxDepth then
+						node.children = {}
+						local available = math.max(1, maxNodes - visited)
+						local listed = robloxExplorer.childrenOf(inst, available)
+						if #listed < totalChildren then truncated = true end
+						for _, child in ipairs(listed) do
+							if visited >= maxNodes then truncated = true break end
+						local childNode = buildNode(child.instance, level + 1)
+						if childNode then node.children[#node.children + 1] = childNode end
+						if truncated and visited >= maxNodes then break end
+					end
+				elseif totalChildren > 0 and level >= maxDepth then
+					node.hasMore = true
+						truncated = true
 				end
-				return { ok = true, service = svcName, children = kids }
+				return node
+				end
+				local tree = buildNode(target, 0)
+				return {
+					ok = tree ~= nil,
+					rootPath = path ~= "" and path or (serviceName ~= "" and serviceName or "game"),
+					depth = maxDepth,
+					count = visited,
+					truncated = truncated,
+					tree = tree,
+				}
+			end,
+		},
+		{
+			name = "read_roblox_script",
+			readOnly = true,
+			description = "Read an accessible Script, LocalScript, or ModuleScript from a returned live DataModel path. Source/decompile access depends on executor capabilities.",
+			parameters = {
+				type = "object",
+				properties = { path = { type = "string", description = "Luau path from inspect_roblox_tree" } },
+				required = { "path" },
+			},
+			run = function(args)
+				local path = util.trim(tostring(args.path or ""))
+				if path == "" then return { ok = false, error = "Script path is required" } end
+				local inst, resolveErr = robloxExplorer.resolvePath(path)
+				if not inst then return { ok = false, error = tostring(resolveErr or "Instance not found") } end
+				local isScript = false
+				pcall(function() isScript = inst:IsA("LuaSourceContainer") end)
+				if not isScript then return { ok = false, error = "Target is not a readable script container" } end
+				local source, sourceKind = robloxExplorer.readScriptSource(inst)
+				if type(source) ~= "string" then return { ok = false, error = tostring(sourceKind or "Source unavailable") } end
+				local originalBytes = #source
+				local maxBytes = 65536
+				if originalBytes > maxBytes then
+					source = source:sub(1, maxBytes)
+					while #source > 0 and not util.validUtf8(source) do source = source:sub(1, -2) end
+				end
+				return {
+					ok = true,
+					path = robloxExplorer.luauPathOf(inst),
+					name = tostring(inst.Name or "Script"),
+					className = tostring(inst.ClassName or "LuaSourceContainer"),
+					sourceKind = sourceKind,
+					bytes = originalBytes,
+					truncated = originalBytes > #source,
+					source = source,
+				}
 			end,
 		},
 		{

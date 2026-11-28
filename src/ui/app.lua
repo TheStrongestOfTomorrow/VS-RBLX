@@ -135,6 +135,12 @@ return function(env)
 		local mobileMode = tostring(config.get("mobile.mode", "auto")) == "on"
 		local drawerOpen = false
 
+		local function compactTouchDesktopMode()
+			if mobileMode or not responsive.isTouchDevice() then return false end
+			local viewport = responsive.viewport
+			return viewport.X < 860 or viewport.Y < 540
+		end
+
 		local reflowWorkbench
 
 		-- TitleBar (bound to window drag + explicit resize toggle + opacity scrub + mobile drawer + controls)
@@ -380,14 +386,22 @@ return function(env)
 		end)
 
 		local actBar
+		local cmdPill
 		local drawerPillBtns = {}
 
 		reflowWorkbench = function()
 			local winW = math.max(1, win.root.Size.X.Offset)
 			local winH = math.max(1, win.root.Size.Y.Offset)
+			local compactTouch = compactTouchDesktopMode()
+			local drawerLayout = mobileMode or compactTouch
+			if titleBar.setCompactTouchMode then titleBar.setCompactTouchMode(compactTouch) end
+			if primaryTabs.setTouchDesktopMode then primaryTabs.setTouchDesktopMode(compactTouch) end
+			if secondaryTabs.setTouchDesktopMode then secondaryTabs.setTouchDesktopMode(compactTouch) end
+			local bgTrans = 1.0 - win.opacity
+			sideBarFrame.BackgroundTransparency = drawerLayout and math.min(0.15, bgTrans) or bgTrans
 			local effTitleH = mobileMode and 38 or TITLE_H
-			local effTabH = mobileMode and 42 or TAB_H
-			local showStatus = (not zenMode) and (not mobileMode)
+			local effTabH = mobileMode and 42 or (compactTouch and 38 or TAB_H)
+			local showStatus = (not zenMode) and (not mobileMode) and (not compactTouch)
 			local effStatusH = showStatus and STATUS_H or 0
 			local bodyAvailH = math.max(0, winH - effTitleH - effStatusH)
 			statusBar.root.Visible = showStatus
@@ -403,12 +417,12 @@ return function(env)
 			secondaryBody.Position = UDim2.fromOffset(0, effTabH + CRUMB_H)
 			secondaryBody.Size = UDim2.new(1, 0, 1, -(effTabH + CRUMB_H))
 
-			local showAct = (not zenMode) and (not mobileMode)
+			local showAct = (not zenMode) and (not drawerLayout)
 			if actBar then
 				actBar.root.Visible = showAct
 			end
 			local effActW = showAct and ACT_W or 0
-			local showSide = (not zenMode) and (not mobileMode) and sideBarVisible
+			local showSide = (not zenMode) and (not drawerLayout) and sideBarVisible
 			local clampedSideW = sideBarWidth
 			if not mobileMode then
 				-- Always reserve an editor lane. The previous 150px sidebar floor could
@@ -423,7 +437,7 @@ return function(env)
 			local mainAvailW = winW
 
 			local showAi = (not zenMode) and aiSidebarVisible
-			local aiOverlay = mobileMode or (winW - effActW - effSideW < 440)
+			local aiOverlay = drawerLayout or (winW - effActW - effSideW < 440)
 			local aiWidthLimit
 			if aiOverlay then
 				aiWidthLimit = math.max(1, math.floor(winW * 0.86))
@@ -434,14 +448,16 @@ return function(env)
 			aiChatPanel.root.Visible = showAi
 			if titleBar.setAiOpen then titleBar.setAiOpen(showAi) end
 			if showAi then
-				aiChatPanel.root.ZIndex = (mobileMode or aiOverlay) and 54 or 20
+				aiChatPanel.root.ZIndex = (drawerLayout or aiOverlay) and 54 or 20
 				aiChatPanel.root.Size = UDim2.new(0, effAiW, 1, 0)
 				aiChatPanel.root.Position = UDim2.new(1, -effAiW, 0, 0)
 			end
 
-			if mobileMode then
-				-- Acode Slide-Over Drawer mode: overlays on top of the editor when `drawerOpen == true`
-				local drawerW = math.min(290, math.max(1, winW - 24))
+			if drawerLayout then
+				-- Acode and compact-touch Desktop both use a temporary slide-over sidebar;
+				-- Desktop mode keeps its own title/tab styling and does not show Acode Quick-Keys.
+				local drawerW = math.min(compactTouch and 320 or 290, math.max(1, winW - 24))
+				local navH = compactTouch and 40 or 34
 				local showDrawer = (not zenMode) and drawerOpen
 				drawerBackdrop.Visible = showDrawer
 				sideBarFrame.Visible = showDrawer
@@ -449,8 +465,13 @@ return function(env)
 				sideBarFrame.Position = UDim2.fromOffset(0, 0)
 				sideBarFrame.Size = UDim2.new(0, drawerW, 1, 0)
 				drawerNav.Visible = true
-				viewletHost.Position = UDim2.fromOffset(0, 34)
-				viewletHost.Size = UDim2.new(1, 0, 1, -34)
+				drawerNav.Size = UDim2.new(1, -1, 0, navH)
+				viewletHost.Position = UDim2.fromOffset(0, navH)
+				viewletHost.Size = UDim2.new(1, 0, 1, -navH)
+				for _, tabButton in pairs(drawerPillBtns) do
+					tabButton.Size = UDim2.new(tabButton.Size.X.Scale, tabButton.Size.X.Offset, 0, compactTouch and 32 or 26)
+				end
+				if cmdPill then cmdPill.Size = UDim2.fromOffset(compactTouch and 36 or 30, compactTouch and 32 or 26) end
 				sideSash.Visible = false
 
 				mainArea.Position = UDim2.fromOffset(0, 0)
@@ -486,7 +507,7 @@ return function(env)
 			mobileQuickBar.root.Size = UDim2.new(1, 0, 0, effQuickH)
 
 			local showPanel = (not zenMode) and panelVisible
-			local panelCap = math.max(0, math.floor(bodyAvailH * 0.44))
+			local panelCap = math.max(0, math.floor(bodyAvailH * (compactTouch and 0.30 or 0.44)))
 			local roomAfterEditor = math.max(0, bodyAvailH - effQuickH - 80)
 			local clampedPanelH = math.min(panelHeight, panelCap, roomAfterEditor)
 			local effPanelH = showPanel and clampedPanelH or 0
@@ -506,7 +527,7 @@ return function(env)
 			zenExitPill.Visible = zenMode
 
 			local curPrimaryDoc = codeStore.active("primary")
-			local canShowPreview = previewOpen and (curPrimaryDoc ~= nil) and languages.isPreviewable(curPrimaryDoc)
+			local canShowPreview = (not compactTouch) and previewOpen and (curPrimaryDoc ~= nil) and languages.isPreviewable(curPrimaryDoc)
 
 			if canShowPreview then
 				primaryGroup.Size = UDim2.new(splitRatio, 0, 1, 0)
@@ -517,7 +538,7 @@ return function(env)
 				editorSplitSash.Visible = true
 				editorSplitSash.Position = UDim2.new(splitRatio, -2, 0, 0)
 				if primaryTabs.reflow then primaryTabs.reflow(math.floor(mainAvailW * splitRatio)) end
-			elseif codeStore.splitOpen then
+			elseif codeStore.splitOpen and not compactTouch then
 				previewPane.root.Visible = false
 				primaryGroup.Size = UDim2.new(splitRatio, 0, 1, 0)
 				secondaryGroup.Visible = true
@@ -560,7 +581,7 @@ return function(env)
 			if zenMode then
 				setZenMode(false)
 			end
-			if mobileMode then
+			if mobileMode or compactTouchDesktopMode() then
 				activeViewlet = id
 				drawerOpen = true
 			else
@@ -616,7 +637,7 @@ return function(env)
 			db.BackgroundTransparency = 0
 			drawerPillBtns[dSpec.id] = db
 		end
-		local cmdPill = P.button(drawerNav, {
+		cmdPill = P.button(drawerNav, {
 			name = "DrawerCmdPaletteBtn",
 			size = UDim2.fromOffset(30, 26),
 			bg = theme.color.inputBg,
@@ -672,7 +693,7 @@ return function(env)
 			local bgTrans = 1.0 - clamped
 			titleBar.root.BackgroundTransparency = bgTrans
 			actBar.root.BackgroundTransparency = bgTrans
-			sideBarFrame.BackgroundTransparency = mobileMode and math.min(0.15, bgTrans) or bgTrans
+			sideBarFrame.BackgroundTransparency = (mobileMode or compactTouchDesktopMode()) and math.min(0.15, bgTrans) or bgTrans
 			editorsRegion.BackgroundTransparency = bgTrans
 			primaryBreadcrumbs.root.BackgroundTransparency = bgTrans
 			secondaryBreadcrumbs.root.BackgroundTransparency = bgTrans
@@ -692,7 +713,7 @@ return function(env)
 
 		codeStore.changed:connect(function()
 			-- Auto-close mobile drawer when opening/activating a file so the player sees code immediately!
-			if mobileMode and drawerOpen then
+			if drawerOpen and (mobileMode or compactTouchDesktopMode()) then
 				drawerOpen = false
 			end
 			local activeDoc = codeStore.active("primary")

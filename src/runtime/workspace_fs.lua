@@ -148,6 +148,16 @@ return function(env)
 		end
 	end
 
+	local function cleanWorkspaceName(name)
+		local raw = tostring(name or "")
+		local clean, err = fsx.sanitise(raw)
+		if not clean then return nil, err end
+		if clean ~= raw or clean:find("/", 1, true) or clean == "" or clean == "." or clean == ".." then
+			return nil, "Project workspace name must be one safe path segment"
+		end
+		return clean
+	end
+
 	function M.listWorkspaces()
 		local items = fsx.list("", { scope = "workspaces" })
 		local out = {}
@@ -308,6 +318,45 @@ return function(env)
 			out[#out + 1] = item.path
 		end
 		return out
+	end
+
+	-- Read-only named-project access for AI authorization scopes. Never changes the
+	-- globally active workspace or emits editor change signals.
+	function M.projectRoot(name)
+		local clean, err = cleanWorkspaceName(name)
+		if not clean then return nil, err end
+		if M.rawMode then return nil, "Named project scopes are unavailable in raw filesystem mode" end
+		return fsx.root .. "/workspaces/" .. clean, clean
+	end
+
+	function M.listProjectFiles(name)
+		local root, cleanOrErr = M.projectRoot(name)
+		if not root then return nil, cleanOrErr end
+		local scope = { scope = "workspaces/" .. cleanOrErr }
+		local out = {}
+		local truncated = false
+		local function walk(dir, depth)
+			if depth > 14 or #out >= 1200 then truncated = true return end
+			for _, item in ipairs(fsx.list(dir, scope)) do
+				if item.isDir then
+					if item.name ~= ".git" and item.name ~= "node_modules" then walk(item.path, depth + 1) end
+				else
+					out[#out + 1] = item.path
+					if #out >= 1200 then truncated = true return end
+				end
+			end
+		end
+		walk("", 0)
+		return out, nil, { root = root, truncated = truncated }
+	end
+
+	function M.readProjectFile(name, relPath)
+		local clean, err = cleanWorkspaceName(name)
+		if not clean then return nil, err end
+		if M.rawMode then return nil, "Named project scopes are unavailable in raw filesystem mode" end
+		local rel, pathErr = fsx.sanitise(relPath, false)
+		if not rel then return nil, pathErr end
+		return fsx.read(rel, { scope = "workspaces/" .. clean })
 	end
 
 	function M.diskPath(relPath)

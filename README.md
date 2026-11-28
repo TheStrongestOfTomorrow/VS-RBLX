@@ -5,9 +5,11 @@
 > - Blank, free-form, and off-topic issues are **disabled** (`blank_issues_enabled: false`).
 > - Every opened or edited issue is **automatically scanned by GitHub Actions** (`.github/workflows/extension-gatekeeper.yml`) and **re-scanned client-side by the VS-RBLX Malware Scanner** before installation.
 > - Any issue that deviates from the 5 declarative JSON schemas or contains executable code (`loadstring`, `HttpGet`, `request`), webhooks (`discord.com/api/webhooks`, Slack, Telegram), obfuscators, or credential access is **immediately rejected and closed** (`not_planned`).
-> - **Comments on verified open extension issues remain open** so the community can review, discuss, and rate extensions!
+> - **Comments on verified open extension issues remain open** for public reviews and discussion; comments never publish versions. Only the parent issue's author can pass the owner-verified version sub-issue workflow.
+>
+> Read the [Community Extension Contributor Guide](CONTRIBUTING_EXTENSIONS.md) before submitting an extension or update.
 
-**VS-RBLX** is a **Visual Studio Code-inspired workbench** built in **100% client-side Luau** for Roblox Executors and LocalScripts. It brings a multi-tab syntax-highlighted IDE, **local disk persistence** (`writefile` / `readfile`), **GitHub repository sync** (`request` / `http_request`), an integrated terminal, unified & 2-pane Git diffs, **LSP-style IntelliSense**, a **Locked 5-Template Community Extension Hub**, **Live Split Preview**, **Acode Mobile Mode**, and a draggable, viewport-auto-resized, player-resizable workbench directly inside Roblox.
+**VS-RBLX** is a **Visual Studio Code-inspired workbench** built in **100% client-side Luau** for Roblox Executors and LocalScripts. It brings a multi-tab syntax-highlighted IDE, **local disk persistence** (`writefile` / `readfile`), **GitHub repository sync** (`request` / `http_request`), an integrated terminal, unified & 2-pane Git diffs, **LSP-style IntelliSense**, a **Locked 5-Template Community Extension Hub**, **Live Split Preview**, **Acode Mobile Mode**, and a draggable, viewport-auto-resized, player-resizable workbench directly inside Roblox. Compact touch screens also get a touch-aware Desktop Mode with overlay workspace navigation and a wider editor lane; this does not force users into Acode Mode.
 
 > **Current development priority: UI reliability.** The workbench is being stabilized across narrow desktop windows, phone portrait/landscape, touch input, and the on-screen keyboard before another feature sprint. The active roadmap and acceptance checks live in [`AGENTS.md`](AGENTS.md); please include device size, mode, and reproducible steps when reporting a layout issue.
 
@@ -51,7 +53,7 @@ For Roblox Studio testing (without executor globals), paste the contents of [`di
 ### Authentic VS Code Workbench
 - **Title Bar**: VS-RBLX emblem, top dropdown menus (`File`, `Edit`, `View`, `Run`, `GitHub` — auto-collapsing into phone-safe `≡ Menu` & `⋯` on narrow viewports), centered Command Center search pill (`Ctrl+P`), **`✦ AI` Integrated AI Sidebar toggle (`Ctrl+Alt+I`)**, **`🔐` Zero-Knowledge Master Vault**, **`⤢` Explicit Resize-Mode Toggle (`ON` / `OFF`)**, **Ghost-Coding Opacity Slider (`30%–100%`)**, **Acode Mobile Mode (`📱` / `☰` Drawer)**, **Zen Mode (`Ctrl+Shift+Z`)**, layout toggles, and Minimize / Maximize / Close controls.
 - **VS Code-Style Integrated AI Assistant & `Ctrl+I` Inline Code Editor (`✦ AI`)**:
-  - **Secondary AI Sidebar (`Ctrl+Alt+I`)**: Docked on the right side of the workbench just like VS Code's built-in AI Chat, defaulting out-of-the-box to **Kilo Code (`kilo-auto/free` & `:free` cloud LLMs — zero API key, zero sign-up required, plus 1-click live `:free` model pool sync)** alongside **OpenAI**, **Anthropic Claude**, **OpenRouter**, **DeepSeek**, **Custom OpenAI-Compatible / Ollama Endpoints**, and **Offline Smart Luau Mode**; includes buffered **SSE stream replay**, `#file` / `#problems` / `#remotes` context pills, **3-Mode Permission Gate (`🛡 Ask First` · `⚡ Auto Edit` · `👁 Read Only`)**, native IDE/Roblox agent tools (`workspace_edit_file`, non-executing `check_luau_syntax`, deadline-guarded `run_luau_bounded`, live `inspect_roblox_tree` & `discover_remotes`), and 1-click **`✓ Apply`** / **`◫ Diff`**. AI chats are locally saved as bounded threads with create/switch, auto-titles, rename/archive/restore/delete, title/transcript search, and local JSON export; legacy single-chat history is migrated automatically.
+  - **Secondary AI Sidebar (`Ctrl+Alt+I`)**: Docked on the right side of the workbench just like VS Code's built-in AI Chat, defaulting out-of-the-box to **Kilo Code (`kilo-auto/free` & `:free` cloud LLMs — zero API key, zero sign-up required, plus 1-click live `:free` model pool sync)** alongside **OpenAI**, **Anthropic Claude**, **OpenRouter**, **DeepSeek**, **Custom OpenAI-Compatible / Ollama Endpoints**, and **Offline Smart Luau Mode**; includes buffered **SSE stream replay**, `#file` / `#problems` / `#remotes` context pills, **3-Mode Permission Gate (`🛡 Ask First` · `⚡ Auto Edit` · `👁 Read Only`)**, native IDE/Roblox agent tools (recursive/paged active-project list/search/read, `workspace_edit_file`, non-executing `check_luau_syntax`, deadline-guarded `run_luau_bounded`, bounded read-only live `inspect_roblox_tree` / `read_roblox_script` / `discover_remotes`), and 1-click **`✓ Apply`** / **`◫ Diff`**. Generated AI artifacts have a separate bounded per-thread filesystem under `VSRBLX/ai/workspaces/threads/<thread-id>`, isolated from project files and conversation threads; copying into a project and opening another named project both require dedicated approval, and cross-project grants are read-only and thread-scoped. No live-game mutation is provided. AI chats are locally saved as bounded threads with create/switch, auto-titles, rename/archive/restore/delete, title/transcript search, and local JSON export; legacy single-chat history is migrated automatically. The sidebar includes a user-confirmed, compatibility-checked [Project UAI integration](docs/PROJECT_UAI_INTEGRATION.md); UAI owns its own updater, and VS-RBLX does not pin or replace it.
   - **Floating `Ctrl+I` Inline Editor Bar**: Trigger inline code generation or selection refactoring directly inside the active code editor with `[✓ Accept]`, `[◫ Diff]`, and `[✕ Discard]`.
 - **Zero-Knowledge Master Vault (`VSRBLX/vault.enc` — `🔐`)**:
   - Optional first-boot Master Vault Key (`PBKDF2-HMAC-SHA256` + `Encrypt-then-HMAC-SHA256` stream cipher) encrypting GitHub PATs and AI API keys on disk while scrubbing plaintext `settings.json` — unrecoverable without your Master Key, with a 1-click **"Leave Unencrypted"** opt-out if you prefer plain storage.
@@ -149,7 +151,7 @@ VS-RBLX/
 ## Building & Testing Offline
 
 ```bash
-# 1. Static syntax & require-graph check across init.lua + all 91 modules
+# 1. Static syntax & require-graph check across init.lua + all 93 modules
 luajit test/check.lua
 
 # 2. Bundle all modules into dist/vsrblx.lua & dist/vsrblx.localscript.lua
@@ -157,6 +159,11 @@ luajit tools/bundle.lua
 
 # 3. Run the end-to-end headless UI, Disk FS, Vault, AI Agent, CDN Hub & Window test suite
 luajit test/run.lua
+
+# 4. Validate community submissions, owner-authored version issues, and registry resolution
+node .github/scripts/validate_extension_issue.js --self-test
+node .github/scripts/validate_extension_version.js --self-test
+node .github/scripts/build_extension_registry.js --self-test
 ```
 
 ---

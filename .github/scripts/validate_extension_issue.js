@@ -198,8 +198,10 @@ function validateIssue(title, body) {
     return { ok: false, malicious: state.malicious, findings };
   }
 
-  if (form.attestations && /-\s*\[\s\]/.test(form.attestations)) {
-    findings.push("All Security Attestation checkboxes must be checked (`[X]`).");
+  const expectedAttestations = /^\[EXT-VERSION\]/i.test(String(title || "")) ? 3 : 2;
+  const checkedAttestations = (form.attestations.match(/-\s*\[[xX]\]/g) || []).length;
+  if (!form.attestations || checkedAttestations < expectedAttestations || /-\s*\[\s\]/.test(form.attestations)) {
+    findings.push(`All ${expectedAttestations} required Security Attestation checkboxes must be present and checked ([X]).`);
   }
 
   let manifest = null;
@@ -226,6 +228,12 @@ function validateIssue(title, body) {
   }
   if (manifest.id !== form.id) {
     findings.push(`Form Extension ID (\`${form.id}\`) does not match \`manifest.id\` (\`${manifest.id}\`).`);
+  }
+  if (form.name && manifest.name !== form.name) {
+    findings.push(`Form Display Name (\`${form.name}\`) does not match \`manifest.name\` (\`${manifest.name}\`).`);
+  }
+  if (form.summary && manifest.summary !== form.summary) {
+    findings.push("Form Summary does not match `manifest.summary`.");
   }
   if (form.version && manifest.version !== form.version) {
     findings.push(`Form Version (\`${form.version}\`) does not match \`manifest.version\` (\`${manifest.version}\`).`);
@@ -357,7 +365,7 @@ if (require.main === module && process.argv.includes("--self-test")) {
     "",
     "### Summary",
     "",
-    "Northern lights emerald & slate color palette.",
+    "Northern lights palette.",
     "",
     "### Manifest JSON",
     "",
@@ -375,7 +383,10 @@ if (require.main === module && process.argv.includes("--self-test")) {
     "",
     "### Security Attestations",
     "",
-    "- [X] Declarative only",
+    "- [X] I selected one of the five supported declarative templates.",
+    "- [X] This submission contains no outbound requests or credential access.",
+    "- [X] I created this work or have permission to distribute it.",
+    "- [X] I understand comments are discussion, not releases.",
   ].join("\n");
   const rGood = validateIssue("[EXT] Aurora Borealis Dark", goodBody);
   if (!rGood.ok) {

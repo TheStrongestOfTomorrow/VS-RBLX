@@ -45,6 +45,114 @@ local function writeAll(path, body)
 	return true
 end
 
+-- Remove indentation only while lexically in code. This keeps every physical newline
+-- (and therefore manifest source line mapping) but avoids oversized executor HttpGet
+-- payloads. Whitespace inside quoted strings, long strings, and long comments is exact.
+local function stripCodeIndent(source)
+	local out = {}
+	local i, n = 1, #source
+	local lineStart = true
+	local state = "code"
+	local quote = nil
+	local longEq = nil
+
+	local function longOpen(pos)
+		if source:sub(pos, pos) ~= "[" then return nil end
+		local j = pos + 1
+		while source:sub(j, j) == "=" do j = j + 1 end
+		if source:sub(j, j) == "[" then return source:sub(pos + 1, j - 1), j - pos + 1 end
+		return nil
+	end
+
+	while i <= n do
+		if lineStart and state == "code" then
+			while source:sub(i, i) == " " or source:sub(i, i) == "\t" do i = i + 1 end
+			lineStart = false
+			if i > n then break end
+		end
+
+		local ch = source:sub(i, i)
+		local next2 = source:sub(i, i + 1)
+		if state == "code" then
+			if ch == "\n" then
+				out[#out + 1] = ch
+				i = i + 1
+				lineStart = true
+			elseif next2 == "--" then
+				out[#out + 1] = "--"
+				i = i + 2
+				local eq, width = longOpen(i)
+				if eq ~= nil then
+					out[#out + 1] = source:sub(i, i + width - 1)
+					i = i + width
+					longEq = eq
+					state = "long_comment"
+				else
+					state = "line_comment"
+				end
+			elseif ch == "'" or ch == '"' then
+				out[#out + 1] = ch
+				quote = ch
+				state = "quoted"
+				i = i + 1
+			elseif ch == "[" then
+				local eq, width = longOpen(i)
+				if eq ~= nil then
+					out[#out + 1] = source:sub(i, i + width - 1)
+					i = i + width
+					longEq = eq
+					state = "long_string"
+				else
+					out[#out + 1] = ch
+					i = i + 1
+				end
+			else
+				out[#out + 1] = ch
+				i = i + 1
+			end
+		elseif state == "line_comment" then
+			if ch == "\n" then
+				out[#out + 1] = ch
+				i = i + 1
+				state = "code"
+				lineStart = true
+			else
+				out[#out + 1] = ch
+				i = i + 1
+			end
+		elseif state == "quoted" then
+			out[#out + 1] = ch
+			i = i + 1
+			if ch == "\\" and i <= n then
+				out[#out + 1] = source:sub(i, i)
+				if source:sub(i, i) == "\n" then lineStart = false end
+				i = i + 1
+			elseif ch == quote then
+				state = "code"
+			end
+		elseif state == "long_string" or state == "long_comment" then
+			local close = "]" .. longEq .. "]"
+			if source:sub(i, i + #close - 1) == close then
+				out[#out + 1] = close
+				i = i + #close
+				state = "code"
+			else
+				out[#out + 1] = ch
+				i = i + 1
+				if ch == "\n" then lineStart = false end
+			end
+		end
+	end
+	return table.concat(out)
+end
+
+local indentFixture = '  local quoted = "\\n\\tvalue"\n\tlocal long = [=[\n  keep this literal indent\n]=]\n\t--[=[\n  keep this comment body\n]=]\n\treturn quoted\n'
+local compactFixture = 'local quoted = "\\n\\tvalue"\nlocal long = [=[\n  keep this literal indent\n]=]\n--[=[\n  keep this comment body\n]=]\nreturn quoted\n'
+if stripCodeIndent(indentFixture) ~= compactFixture then
+	io.stderr:write("Bundle indentation compactor changed string/comment content.\n")
+	os.exit(1)
+end
+
 local modules = {}
 local totalBytes = 0
 for _, path in ipairs(listLua("src")) do
@@ -124,7 +232,7 @@ for _, mod in ipairs(modules) do
 	emit("-- " .. mod.id)
 	emit("-- " .. ("="):rep(74))
 	emit(string.format('__VSRBLX_MODULES[%q] = (function()', mod.id))
-	mod.startLine, mod.endLine = emit(mod.source)
+	mod.startLine, mod.endLine = emit(stripCodeIndent(mod.source))
 	emit("end)()")
 	emit("")
 end
@@ -132,11 +240,20 @@ end
 emit("-- " .. ("="):rep(74))
 emit("-- bootstrap")
 emit("-- " .. ("="):rep(74))
-local bootStart, bootEnd = emit(boot)
+local bootStart, bootEnd = emit(stripCodeIndent(boot))
 emit("")
 
 local bundleText = table.concat(lines, "\n")
 local localScriptText = "--!nocheck\n-- VS-RBLX Standalone LocalScript (StarterPlayerScripts / StarterGui)\n" .. bundleText
+local MAX_LOADER_BYTES = 990000
+if #bundleText > MAX_LOADER_BYTES then
+	io.stderr:write(string.format(
+		"Bundle is %d bytes; the direct HttpGet/loadstring safety budget is %d bytes. Reduce source or improve bundle compaction before publishing.\n",
+		#bundleText,
+		MAX_LOADER_BYTES
+	))
+	os.exit(1)
+end
 
 local parsedOk, parsedErrs = luau.load(bundleText, "dist/vsrblx.lua", { entry = true })
 if not parsedOk then

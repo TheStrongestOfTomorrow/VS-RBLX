@@ -1,0 +1,47 @@
+name: Luau Source and Bundle Syntax
+
+on:
+  push:
+    paths:
+      - "src/**/*.lua"
+      - "init.lua"
+      - "dist/vsrblx.lua"
+      - "dist/vsrblx.localscript.lua"
+      - ".github/workflows/luau-syntax.yml"
+  pull_request:
+    paths:
+      - "src/**/*.lua"
+      - "init.lua"
+      - "dist/vsrblx.lua"
+      - "dist/vsrblx.localscript.lua"
+      - ".github/workflows/luau-syntax.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-with-official-luau:
+    name: Parse every source module and distribution with Luau
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Luau compiler 0.748
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/luau-lang/luau/releases/download/0.748/luau-ubuntu.zip \
+            --output /tmp/luau-ubuntu.zip
+          unzip -q /tmp/luau-ubuntu.zip -d /tmp/luau
+          test -x /tmp/luau/luau-compile
+
+      - name: Compile all source files and distributable bundles
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            /tmp/luau/luau-compile "$file" >/dev/null
+          done < <(find src -type f -name '*.lua' -print0)
+          /tmp/luau/luau-compile init.lua >/dev/null
+          /tmp/luau/luau-compile dist/vsrblx.lua >/dev/null
+          /tmp/luau/luau-compile dist/vsrblx.localscript.lua >/dev/null
