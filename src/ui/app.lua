@@ -383,16 +383,18 @@ return function(env)
 		local drawerPillBtns = {}
 
 		reflowWorkbench = function()
-			local winW = math.max(280, win.root.Size.X.Offset)
-			local winH = math.max(200, win.root.Size.Y.Offset)
+			local winW = math.max(1, win.root.Size.X.Offset)
+			local winH = math.max(1, win.root.Size.Y.Offset)
 			local effTitleH = mobileMode and 38 or TITLE_H
 			local effTabH = mobileMode and 42 or TAB_H
 			local showStatus = (not zenMode) and (not mobileMode)
+			local effStatusH = showStatus and STATUS_H or 0
+			local bodyAvailH = math.max(0, winH - effTitleH - effStatusH)
 			statusBar.root.Visible = showStatus
 			if titleBar.reflow then titleBar.reflow(winW) end
 			if statusBar.reflow then statusBar.reflow(winW) end
 			workbenchBody.Position = UDim2.fromOffset(0, effTitleH)
-			workbenchBody.Size = UDim2.new(1, 0, 1, -(effTitleH + (showStatus and STATUS_H or 0)))
+			workbenchBody.Size = UDim2.new(1, 0, 0, bodyAvailH)
 
 			primaryBreadcrumbs.root.Position = UDim2.fromOffset(0, effTabH)
 			primaryBody.Position = UDim2.fromOffset(0, effTabH + CRUMB_H)
@@ -406,21 +408,40 @@ return function(env)
 				actBar.root.Visible = showAct
 			end
 			local effActW = showAct and ACT_W or 0
+			local showSide = (not zenMode) and (not mobileMode) and sideBarVisible
+			local clampedSideW = sideBarWidth
+			if not mobileMode then
+				-- Always reserve an editor lane. The previous 150px sidebar floor could
+				-- consume the whole workbench at the minimum window width.
+				local sideBudget = math.max(0, winW - effActW - 180)
+				clampedSideW = math.min(sideBarWidth, sideBudget)
+				if winW < 580 then
+					clampedSideW = math.min(clampedSideW, math.max(0, math.floor((winW - effActW) * 0.42)))
+				end
+			end
+			local effSideW = showSide and clampedSideW or 0
 			local mainAvailW = winW
 
 			local showAi = (not zenMode) and aiSidebarVisible
-			local effAiW = showAi and math.min(aiSidebarWidth, math.max(200, math.floor(winW * 0.44))) or 0
+			local aiOverlay = mobileMode or (winW - effActW - effSideW < 440)
+			local aiWidthLimit
+			if aiOverlay then
+				aiWidthLimit = math.max(1, math.floor(winW * 0.86))
+			else
+				aiWidthLimit = math.max(200, winW - effActW - effSideW - 240)
+			end
+			local effAiW = showAi and math.min(aiSidebarWidth, aiWidthLimit) or 0
 			aiChatPanel.root.Visible = showAi
 			if titleBar.setAiOpen then titleBar.setAiOpen(showAi) end
 			if showAi then
-				aiChatPanel.root.ZIndex = mobileMode and 54 or 20
+				aiChatPanel.root.ZIndex = (mobileMode or aiOverlay) and 54 or 20
 				aiChatPanel.root.Size = UDim2.new(0, effAiW, 1, 0)
 				aiChatPanel.root.Position = UDim2.new(1, -effAiW, 0, 0)
 			end
 
 			if mobileMode then
 				-- Acode Slide-Over Drawer mode: overlays on top of the editor when `drawerOpen == true`
-				local drawerW = math.min(290, math.max(200, winW - 36))
+				local drawerW = math.min(290, math.max(1, winW - 24))
 				local showDrawer = (not zenMode) and drawerOpen
 				drawerBackdrop.Visible = showDrawer
 				sideBarFrame.Visible = showDrawer
@@ -433,8 +454,10 @@ return function(env)
 				sideSash.Visible = false
 
 				mainArea.Position = UDim2.fromOffset(0, 0)
-				mainArea.Size = UDim2.new(1, -effAiW, 1, 0)
-				mainAvailW = math.max(180, winW - effAiW)
+				-- On phones the AI pane is a temporary overlay, not a permanent
+				-- second column that squeezes the editor into an unusable sliver.
+				mainArea.Size = UDim2.fromScale(1, 1)
+				mainAvailW = winW
 			else
 				drawerBackdrop.Visible = false
 				drawerNav.Visible = false
@@ -442,12 +465,8 @@ return function(env)
 				viewletHost.Position = UDim2.fromOffset(0, 0)
 				viewletHost.Size = UDim2.fromScale(1, 1)
 
-				-- Clamp Desktop Sidebar width on narrow screens (< 580px) so Editor always keeps breathing room!
-				local clampedSideW = (winW < 580)
-					and math.min(sideBarWidth, math.max(150, math.floor((winW - effActW) * 0.42)))
-					or sideBarWidth
-				local showSide = (not zenMode) and sideBarVisible
-				local effSideW = showSide and clampedSideW or 0
+				-- Desktop side widths were budgeted above, keeping the editor lane
+				-- positive even when a restored window is narrower than normal.
 				sideBarFrame.Visible = showSide
 				sideBarFrame.Position = UDim2.fromOffset(effActW, 0)
 				sideBarFrame.Size = UDim2.new(0, clampedSideW, 1, 0)
@@ -455,19 +474,23 @@ return function(env)
 				sideSash.Position = UDim2.fromOffset(effActW + clampedSideW - 2, 0)
 
 				local leftOffset = effActW + effSideW
+				local reservedAiW = (showAi and not aiOverlay) and effAiW or 0
 				mainArea.Position = UDim2.fromOffset(leftOffset, 0)
-				mainArea.Size = UDim2.new(1, -(leftOffset + effAiW), 1, 0)
-				mainAvailW = math.max(180, winW - leftOffset - effAiW)
+				mainArea.Size = UDim2.new(1, -(leftOffset + reservedAiW), 1, 0)
+				mainAvailW = math.max(1, winW - leftOffset - reservedAiW)
 			end
 
 			local showQuickBar = mobileMode and (config.get("mobile.quickKeys", true) ~= false)
-			local effQuickH = showQuickBar and mobileQuickBar.height or 0
-			mobileQuickBar.root.Visible = showQuickBar
+			local effQuickH = showQuickBar and math.min(mobileQuickBar.height, bodyAvailH) or 0
+			mobileQuickBar.root.Visible = showQuickBar and effQuickH > 0
+			mobileQuickBar.root.Size = UDim2.new(1, 0, 0, effQuickH)
 
 			local showPanel = (not zenMode) and panelVisible
-			local clampedPanelH = math.min(panelHeight, math.max(90, math.floor((winH - effTitleH) * 0.44)))
+			local panelCap = math.max(0, math.floor(bodyAvailH * 0.44))
+			local roomAfterEditor = math.max(0, bodyAvailH - effQuickH - 80)
+			local clampedPanelH = math.min(panelHeight, panelCap, roomAfterEditor)
 			local effPanelH = showPanel and clampedPanelH or 0
-			panelHolder.Visible = showPanel
+			panelHolder.Visible = showPanel and effPanelH > 0
 			panelHolder.Size = UDim2.new(1, 0, 0, effPanelH)
 			panelHolder.Position = UDim2.new(0, 0, 1, -effPanelH)
 
@@ -475,7 +498,7 @@ return function(env)
 				mobileQuickBar.root.Position = UDim2.new(0, 0, 1, -(effPanelH + effQuickH))
 			end
 
-			panelSash.Visible = showPanel
+			panelSash.Visible = showPanel and effPanelH > 0
 			panelSash.Position = UDim2.new(0, 0, 1, -effPanelH - 2)
 
 			editorsRegion.Position = UDim2.fromOffset(0, 0)

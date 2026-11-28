@@ -187,14 +187,18 @@ return function(env)
 			bg = theme.color.sideBarHeader,
 			zIndex = 21,
 		})
-		P.label(header, {
-			size = UDim2.new(1, -96, 1, 0),
-			pos = UDim2.fromOffset(10, 0),
-			text = "✦ INTEGRATED AI",
+		local threadBtn = P.button(header, {
+			name = "AiThreadBtn",
+			size = UDim2.new(1, -100, 1, 0),
+			pos = UDim2.fromOffset(6, 0),
+			alignX = Enum.TextXAlignment.Left,
+			hoverBg = theme.color.hover,
+			text = "",
 			bold = true,
-			textSize = 11,
+			textSize = 10,
 			color = theme.color.tabActiveText,
 			truncate = true,
+			radius = 3,
 			zIndex = 22,
 		})
 
@@ -204,6 +208,117 @@ return function(env)
 			zIndex = 22,
 		})
 		P.list(hdrBtns, Enum.FillDirection.Horizontal, 2, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
+
+		local function refreshThreadLabel()
+			local current = agentLoop.currentThread()
+			threadBtn.Text = "✦ " .. (current and current.title or "AI Chat") .. " ▾"
+		end
+
+		local function showThreadResults(matches, x, y)
+			local items = {}
+			for _, thread in ipairs(matches) do
+				local threadId = thread.id
+				items[#items + 1] = {
+					label = (thread.archived and "▣ " or (thread.active and "● " or "  ")) .. thread.title,
+					shortcut = tostring(thread.messageCount) .. " msgs",
+					onClick = function()
+						local ok, err = agentLoop.switchThread(threadId)
+						if not ok then overlay.toast(tostring(err), "warn", 2) end
+						refreshThreadLabel()
+					end,
+				}
+			end
+			if #items == 0 then
+				items[1] = { label = "No matching chats", onClick = function() end }
+			end
+			overlay.dropdown(x, y, items, 250)
+		end
+
+		local function openThreadMenu()
+			local pos = threadBtn.AbsolutePosition
+			local menuItems = {}
+			for _, thread in ipairs(agentLoop.listThreads()) do
+				local threadId = thread.id
+				menuItems[#menuItems + 1] = {
+					label = (thread.archived and "▣ " or (thread.active and "● " or "  ")) .. thread.title,
+					shortcut = tostring(thread.messageCount),
+					onClick = function()
+						local ok, err = agentLoop.switchThread(threadId)
+						if not ok then overlay.toast(tostring(err), "warn", 2) end
+						refreshThreadLabel()
+					end,
+				}
+			end
+			menuItems[#menuItems + 1] = { separator = true }
+			menuItems[#menuItems + 1] = {
+				label = "Search saved chats...",
+				onClick = function()
+					overlay.prompt({
+						title = "Search AI Chats",
+						placeholder = "Search titles and conversation text",
+						onConfirm = function(query)
+							local anchor = threadBtn.AbsolutePosition
+							showThreadResults(agentLoop.searchThreads(query), anchor.X, anchor.Y + 30)
+						end,
+					})
+				end,
+			}
+			menuItems[#menuItems + 1] = {
+				label = "Rename current chat...",
+				onClick = function()
+					local current = agentLoop.currentThread()
+					overlay.prompt({
+						title = "Rename AI Chat",
+						default = current and current.title or "",
+						placeholder = "Chat title",
+						onConfirm = function(title)
+							local ok, err = agentLoop.renameThread(current and current.id, title)
+						if not ok then overlay.toast(tostring(err), "warn", 2) end
+						refreshThreadLabel()
+					end,
+					})
+				end,
+			}
+			menuItems[#menuItems + 1] = {
+				label = "Archive / restore current chat",
+				onClick = function()
+					local current = agentLoop.currentThread()
+					local ok, err = agentLoop.archiveThread(current and current.id, current and current.archived ~= true)
+					if not ok then overlay.toast(tostring(err), "warn", 2) end
+					refreshThreadLabel()
+				end,
+			}
+			menuItems[#menuItems + 1] = {
+				label = "Export current chat as JSON",
+				onClick = function()
+					local current = agentLoop.currentThread()
+					local path, err = agentLoop.exportThread(current and current.id)
+					if path then overlay.toast("Exported chat to " .. path, "good", 3)
+					else overlay.toast(tostring(err), "warn", 2) end
+				end,
+			}
+			menuItems[#menuItems + 1] = {
+				label = "Delete current chat...",
+				onClick = function()
+					local current = agentLoop.currentThread()
+					overlay.confirm({
+						title = "Delete this AI chat?",
+						message = "This removes the saved conversation from local VS-RBLX storage.",
+						primaryText = "Delete Chat",
+						onPrimary = function()
+							local ok, err = agentLoop.deleteThread(current and current.id)
+						if not ok then overlay.toast(tostring(err), "warn", 2) end
+						refreshThreadLabel()
+					end,
+					})
+				end,
+			}
+			local pos = threadBtn.AbsolutePosition
+			overlay.dropdown(pos.X, pos.Y + 30, menuItems, 250)
+		end
+
+		threadBtn.Activated:Connect(openThreadMenu)
+		refreshThreadLabel()
 
 		local keyBtn = P.button(hdrBtns, {
 			name = "AiApiKeyBtn",
@@ -229,7 +344,9 @@ return function(env)
 			order = 2,
 			zIndex = 23,
 			onClick = function()
-				agentLoop.clearHistory()
+				local thread, err = agentLoop.createThread()
+				if not thread then overlay.toast(tostring(err), "warn", 2) end
+				refreshThreadLabel()
 			end,
 		})
 
@@ -478,6 +595,7 @@ return function(env)
 			P.pad(transcript, 4, 4, 8, 4)
 			P.list(transcript, Enum.FillDirection.Vertical, 6)
 
+			refreshThreadLabel()
 			permChip.Text = permLabels[agentLoop.permissionMode()] or "🛡 Ask First"
 			sendBtn.Text = agentLoop.busy and "■ Stop" or "Send ➤"
 			sendBtn.BackgroundColor3 = agentLoop.busy and theme.color.bad or theme.color.accent
@@ -738,7 +856,10 @@ return function(env)
 		end
 
 		sendBtn.MouseButton1Click:Connect(submitPrompt)
-		agentLoop.changed:connect(renderMessages)
+		agentLoop.changed:connect(function(reason)
+			if reason == "thread" or reason == "user" then refreshThreadLabel() end
+			renderMessages()
+		end)
 		theme.changed:connect(function()
 			root.BackgroundColor3 = theme.color.sideBar
 			leftBorder.BackgroundColor3 = theme.color.border

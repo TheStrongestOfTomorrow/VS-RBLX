@@ -103,8 +103,11 @@ return function(env)
 		local kbReserve = math.max(M.keyboardHeight, cfgKb)
 		local x = pad
 		local y = pad
-		local w = math.max(300, M.viewport.X - pad * 2)
-		local h = math.max(220, M.viewport.Y - topInset - kbReserve - pad * 2)
+		-- Keep the usable rectangle truthful on compact phones and while the virtual
+		-- keyboard is open. Fabricating a 300x220 minimum here made the window extend
+		-- beyond short viewports and pushed dialogs behind the keyboard.
+		local w = math.max(1, M.viewport.X - pad * 2)
+		local h = math.max(1, M.viewport.Y - topInset - kbReserve - pad * 2)
 		return {
 			x = x,
 			y = y,

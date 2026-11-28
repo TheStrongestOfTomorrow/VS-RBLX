@@ -822,6 +822,53 @@ return function(env)
 			minimap.updateViewport(scrollY, viewH, contentH)
 		end
 
+		-- The invisible native TextBox owns input, but the highlighted text/caret are
+		-- drawn in the outer ScrollingFrame. Keep that visual caret in view as users
+		-- type or move with touch/keyboard; native TextBox scrolling alone is not enough.
+		local function revealCursor()
+			if not isFocused or not currentDoc or currentDoc.readOnly then return end
+			local lh = math.max(1, theme.sizes.editorLineHeight)
+			local line = math.max(1, currentDoc.view.line or 1)
+			local col = math.max(1, currentDoc.view.col or 1)
+			local lineText = (lexCache and lexCache.lines[line]) or ""
+			local viewSize = scroll.AbsoluteSize
+			local canvasSize = scroll.CanvasSize
+			local pos = scroll.CanvasPosition
+			local viewH = math.max(1, viewSize.Y)
+			local viewW = math.max(1, viewSize.X)
+			local caretTop = 6 + (line - 1) * lh
+			local caretBottom = caretTop + lh
+			local stickyInset = stickyBar.Visible and 24 or 4
+			local targetY = pos.Y
+			if caretTop < pos.Y + stickyInset then
+				targetY = caretTop - stickyInset
+			elseif caretBottom > pos.Y + viewH - 4 then
+				targetY = caretBottom - viewH + 4
+			end
+			local maxY = math.max(0, canvasSize.Y.Offset - viewH)
+			targetY = util.clamp(targetY, 0, maxY)
+
+			local targetX = pos.X
+			if not box.TextWrapped then
+				local fontSz = theme.sizes.editorFont
+				local charPx = math.max(6, math.floor(fontSz * 0.6 + 0.5))
+				local tabSz = tonumber(config.get("editor.tabSize", 4)) or 4
+				local prefix = lineText:sub(1, col - 1):gsub("\t", string.rep(" ", tabSz))
+				local effGutter = gutter.Visible and gutterW or 8
+				local caretX = effGutter + 8 + #prefix * charPx
+				if caretX < pos.X + effGutter + 8 then
+					targetX = caretX - effGutter - 8
+				elseif caretX + 2 > pos.X + viewW - 4 then
+					targetX = caretX + 6 - viewW
+				end
+				targetX = util.clamp(targetX, 0, math.max(0, canvasSize.X.Offset - viewW))
+			end
+
+			if targetX ~= pos.X or targetY ~= pos.Y then
+				scroll.CanvasPosition = Vector2.new(targetX, targetY)
+			end
+		end
+
 		local function applyEditResult(nextText, nextCursor, nextSel)
 			if not currentDoc or currentDoc.readOnly then return false end
 			syncingText = true
@@ -840,6 +887,7 @@ return function(env)
 			minimap.updateSource(lexCache)
 			debouncedDiag.call()
 			drawVisibleLines()
+			revealCursor()
 			return true
 		end
 
@@ -1114,6 +1162,7 @@ return function(env)
 			isFocused = true
 			codeStore.focusedPane = pane
 			drawVisibleLines()
+			revealCursor()
 		end)
 
 		box.FocusLost:Connect(function()
@@ -1151,6 +1200,7 @@ return function(env)
 			codeStore.setCursor(currentDoc.id, box.CursorPosition, box.SelectionStart)
 			debouncedDiag.call()
 			drawVisibleLines()
+			revealCursor()
 			refreshIntelliSense()
 		end)
 
@@ -1158,6 +1208,7 @@ return function(env)
 			if syncingText or not currentDoc then return end
 			codeStore.setCursor(currentDoc.id, box.CursorPosition, box.SelectionStart)
 			drawVisibleLines()
+			revealCursor()
 			refreshSignatureHelp()
 		end)
 

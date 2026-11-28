@@ -1133,7 +1133,9 @@ check("12. Combined Sprint v2B — VS Code Integrated AI Editor, Static CDN 10/P
 	local kiloNoAuthVerified = false
 	H.onHttp(function(req, url)
 		if url == "https://api.kilo.ai/api/gateway/chat/completions" then
-			local hdrs = req and (req.Headers or req.headers) or {}
+			local payload = json.decode(req.Body or "{}") or {}
+			local systemMessage = payload.messages and payload.messages[1] and payload.messages[1].content or ""
+			assertTrue(systemMessage:find("observable acceptance criteria", 1, true) ~= nil, "AI system prompt guides complex tasks through criteria and staged implementation")			assertTrue(systemMessage:find("complete solution", 1, true) ~= nil, "AI system prompt explicitly rejects incomplete stubs for full implementation requests")			local hdrs = req and (req.Headers or req.headers) or {}
 			assertEq(hdrs["Authorization"], nil, "Anonymous Kilo Code `:free` request sends NO Authorization header when unkeyed")
 			kiloNoAuthVerified = true
 			return {
@@ -1159,6 +1161,41 @@ check("12. Combined Sprint v2B — VS Code Integrated AI Editor, Static CDN 10/P
 
 	local kiloReply = api.aiAgent.send("Generate a freeKilo flag")
 	assertTrue(kiloNoAuthVerified and kiloReply ~= nil and kiloReply.codeBlock:find("freeKilo", 1, true) ~= nil, "Kilo Code `kilo-auto/free` answered over SSE with zero API key!")
+
+	-- Saved AI conversation management: persistence, search, switching, rename and delete.
+	local firstThread = api.aiAgent.currentThread()
+	assertTrue(firstThread ~= nil and firstThread.title:find("Generate a freeKilo flag", 1, true) ~= nil, "First user prompt names the active saved chat")
+	assertTrue(#api.aiAgent.searchThreads("freeKilo") >= 1, "Saved chat search matches conversation content")
+	local scratchThread = api.aiAgent.createThread("Scratch planning chat")
+	assertTrue(scratchThread ~= nil and #api.aiAgent.messages == 0, "Create starts an independent empty conversation")
+	assertTrue(api.aiAgent.renameThread(scratchThread.id, "Renamed planning chat"), "Rename updates a saved conversation title")
+	assertTrue(#api.aiAgent.searchThreads("Renamed planning") == 1, "Search matches renamed chat title")
+	assertTrue(api.aiAgent.switchThread(firstThread.id), "Switch restores the earlier conversation")
+	assertTrue(#api.aiAgent.messages >= 2 and api.aiAgent.messages[1].role == "user", "Switched transcript retains saved user and assistant messages")
+	assertTrue(api.aiAgent.switchThread(scratchThread.id), "Switch returns to the renamed conversation")
+	assertTrue(api.aiAgent.archiveThread(scratchThread.id), "Archive marks the current conversation and switches to an active chat")
+	local archivedMatches = api.aiAgent.searchThreads("Renamed planning")
+	assertTrue(#archivedMatches == 1 and archivedMatches[1].archived == true, "Archived conversations remain searchable and are labeled")
+	assertTrue(api.aiAgent.archiveThread(scratchThread.id, false), "Restore unarchives a saved conversation")
+	local exportPath = api.aiAgent.exportThread(scratchThread.id)
+	assertTrue(type(exportPath) == "string" and exportPath:find("ai/exports/", 1, true) == 1, "Export writes a local JSON conversation file")
+	local exportData = json.decode(api.fs.read(exportPath) or "{}")
+	assertEq(exportData.title, "Renamed planning chat", "Conversation export contains the renamed thread")
+	assertTrue(api.aiAgent.deleteThread(scratchThread.id), "Delete removes a saved conversation")
+	assertEq(#api.aiAgent.listThreads(), 1, "Delete leaves the retained conversation intact")
+	local newChatButton = H.byName("AiNewChatBtn")
+	assertTrue(newChatButton ~= nil, "AI chat header exposes a new-conversation button")
+	H.click(newChatButton)
+	local uiCreatedThread = api.aiAgent.currentThread()
+	assertTrue(uiCreatedThread ~= nil and uiCreatedThread.title == "New Chat", "New-conversation button creates and activates an empty saved chat")
+	assertTrue(api.aiAgent.switchThread(firstThread.id), "Switch back to original conversation after UI create")
+	assertTrue(H.byName("AiThreadBtn").Text:find(firstThread.title, 1, true) ~= nil, "Header title tracks active-conversation changes")
+	assertTrue(api.aiAgent.deleteThread(uiCreatedThread.id), "Clean up UI-created test conversation")
+	local persistedRaw = api.fs.read("ai/threads/index.json")
+	assertEq(api.aiAgent.historySaveError, nil, "Saved conversation index has no persistence error")
+	local persistedThreads = json.decode(persistedRaw or "{}")
+	assertTrue(type(persistedThreads.threads) == "table" and #persistedThreads.threads == 1, "Thread index persisted to the virtual/executor filesystem")
+	assertTrue(api.aiAgent.switchThread(firstThread.id), "Active conversation restored after deleting the other thread")
 
 	local syncedFreeModels = api.aiProviders.refreshKiloFreeModels()
 	assertTrue(type(syncedFreeModels) == "table" and #syncedFreeModels == 2, "Live Kilo `:free` model sync kept 2 free models and filtered out paid model")
@@ -1405,6 +1442,54 @@ check("12. Combined Sprint v2B — VS Code Integrated AI Editor, Static CDN 10/P
 	api.runCommand("editor.selectNextOccurrence")
 	assertEq(editorBox.SelectionStart, 17, "Second `Ctrl+D` jumped selection to next occurrence of `coins` on line 2")
 	assertEq(occDoc.content:sub(editorBox.SelectionStart, editorBox.CursorPosition - 1), "coins", "Second `Ctrl+D` highlighted second `coins` occurrence")
+
+	-- Real editor input wiring: smart pair insertion updates the buffer, and the
+	-- rendered caret/selection remains visible when typing or moving past the fold.
+	local typeLines = {}
+	for i = 1, 80 do typeLines[i] = "local item_" .. tostring(i) .. " = " .. tostring(i) end
+	api.writeFile("src/type_scroll.luau", table.concat(typeLines, "\n"))
+	local typeDoc = api.openFile("src/type_scroll.luau", { reloadFromDisk = true })
+	local typeBox = api.app.primaryEditor.box
+	local editorScroll = H.byName("EditorScroll")
+	typeBox.Focused:Fire()
+	typeBox.CursorPosition = #typeDoc.content + 1
+	assertTrue(editorScroll.CanvasPosition.Y > 0, "Typing caret scrolls into view near the end of a long file")
+	typeDoc = api.codeStore.get(typeDoc.id)
+	typeBox.Text = "local t = "
+	typeBox.CursorPosition = 12
+	typeBox.Text = "local t = {"
+	assertEq(typeDoc.content, "local t = {}", "TextBox input path applies smart pair insertion to the live buffer")
+	assertEq(typeBox.CursorPosition, 12, "Smart pair insertion leaves caret between delimiters")
+	local longDoc = api.openFile("src/type_scroll.luau", { reloadFromDisk = true })
+	typeBox.CursorPosition = #longDoc.content + 1
+	typeBox.Text = typeBox.Text .. "\nprint('typed at end')"
+	typeBox.CursorPosition = #typeBox.Text + 1
+	assertTrue(longDoc.content:find("typed at end", 1, true) ~= nil, "Typing into the file updates the active document content")
+	assertTrue(editorScroll.CanvasPosition.Y > 0, "Caret remains visible after text is appended below the fold")
+
+	-- Compact viewport regression: no fabricated minimum bounds, negative editor
+	-- columns, or AI sidebar squeezing the editor into an unusable sliver.
+	H.setViewport(360, 240)
+	local compactWin = H.byName("VSCodeWindow")
+	local compactMain = H.byName("MainEditorAndPanelStack")
+	local compactBody = H.byName("WorkbenchBody")
+	assertTrue(compactWin.AbsolutePosition.X >= 0 and compactWin.AbsolutePosition.Y >= 0, "Compact window stays within viewport origin")
+	assertTrue(compactWin.AbsolutePosition.X + compactWin.AbsoluteSize.X <= 360, "Compact window width stays within viewport")
+	assertTrue(compactWin.AbsolutePosition.Y + compactWin.AbsoluteSize.Y <= 240, "Compact window height stays within viewport")
+	assertTrue(compactMain.AbsoluteSize.X > 0 and compactMain.AbsoluteSize.Y > 0, "Compact desktop layout keeps a positive editor column")
+	local responsiveLayout = api._env.require("ui/responsive")
+	responsiveLayout.setVirtualKeyboard(true, 160)
+	local keyboardWin = H.byName("VSCodeWindow")
+	local safeRect = responsiveLayout.usableRect(6)
+	assertTrue(keyboardWin.AbsoluteSize.Y <= safeRect.height, "Window height respects the virtual-keyboard usable area")
+	responsiveLayout.setVirtualKeyboard(false)
+
+	api.app.setMobileMode(true, { silent = true })
+	assertEq(compactMain.Size.X.Scale, 1, "Mobile AI sidebar overlays instead of reserving editor width")
+	assertTrue(H.byName("AIChatSidebar").AbsoluteSize.X <= compactBody.AbsoluteSize.X, "Mobile AI sidebar fits inside the workbench")
+	assertTrue(compactMain.AbsoluteSize.X > 0, "Mobile editor remains visible with AI sidebar open")
+	api.app.setMobileMode(false, { silent = true })
+	H.setViewport(1440, 900)
 
 	H.click(aiBtn) -- close AI sidebar cleanly before re-execution suite
 end)
