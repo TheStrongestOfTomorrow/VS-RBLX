@@ -12,6 +12,7 @@ return function(env)
 	local robloxExplorer = env.require("runtime/roblox_explorer")
 	local providers = env.require("ai/providers")
 	local aiTools = env.require("ai/tools")
+	local aiWorkspace = env.require("runtime/ai_workspace")
 
 	local THREADS_FILE = "ai/threads/index.json"
 	local LEGACY_HISTORY_FILE = "ai/history.json"
@@ -38,7 +39,7 @@ return function(env)
 	local SYSTEM_PROMPT = table.concat({
 		"You are VS-RBLX AI, a capable coding agent inside a Roblox client. Deliver the requested outcome, not just advice, when the user asks for an implementation.",
 		"For substantial scripts, multi-file work, or complex GUIs, work in stages: extract explicit requirements and observable acceptance criteria; inspect relevant workspace files, live context, and available APIs; form a concise plan; implement the complete solution; compile it; run only when appropriate and authorized; inspect evidence and fix specific failures. Do not stop at a stub, TODO list, or partial scaffold unless the user asked for one.",
-		"Use the actual offered tool schemas. Read existing code and related files before editing; use workspace_search/list/read to build context, workspace_edit_file for a unique surgical change, workspace_write_file for a new or intentionally replaced file, and check_luau_syntax before claiming syntax validation.",
+		"Use the actual offered tool schemas. Project workspace_list_files/search/read tools inspect the active project recursively; other named projects can be listed by name only, then require workspace_authorize_project and explicit user approval before read-only listing/search/read. Authorization is thread-scoped. inspect_roblox_tree and read_roblox_script inspect only live DataModel instances the host exposes. Read existing code before editing; workspace_edit_file/workspace_write_file affect the active project and require the configured permission mode. Use ai_workspace_list_files/read_file/write_file for private generated artifacts stored separately under the AI workspace, never describe those as project changes. Cross-copy only through ai_workspace_transfer_to_project after the user explicitly requests that transfer; require explicit overwrite approval if a destination exists. Use check_luau_syntax before claiming syntax validation.",
 		"Write idiomatic Roblox Luau. Use real Roblox services/APIs, distinguish LocalScript/client behavior from server-authoritative behavior, and never claim a local change replicated unless observed. For recurring connections, instances, input bindings, and tasks, include explicit cleanup and error handling appropriate to their lifetime.",
 		"For GUI code, implement the requested controls and states completely; account for touch targets, viewport resizing, scrolling, keyboard/input behavior, readable hierarchy, and cleanup. Avoid unsupported APIs, placeholder callbacks, hidden assumptions, and unrelated features.",
 		"When requirements are clear, proceed without ritual questions. Ask only for a decision that genuinely blocks implementation. A tool permission mode controls authorization for VS-RBLX tool calls; it is not a reason to decline ordinary coding help. Never bypass approvals, tool scopes, or applicable safety rules.",
@@ -276,6 +277,8 @@ return function(env)
 		end
 		local active = threadById(activeThreadId)
 		M.messages = active.messages
+		aiWorkspace.setThread(activeThreadId)
+		aiTools.setThread(activeThreadId)
 		saveHistory()
 	end
 
@@ -286,6 +289,8 @@ return function(env)
 		activeThreadId = record.id
 		M.messages = record.messages
 		M.pendingApproval = nil
+		aiWorkspace.setThread(record.id)
+		aiTools.setThread(record.id)
 		saveHistory()
 		M.changed:fire("thread")
 		return M.currentThread()
@@ -300,6 +305,8 @@ return function(env)
 		activeThreadId = record.id
 		M.messages = record.messages
 		M.pendingApproval = nil
+		aiWorkspace.setThread(record.id)
+		aiTools.setThread(record.id)
 		saveHistory()
 		M.changed:fire("thread")
 		return true
@@ -561,7 +568,7 @@ return function(env)
 						toolResult = { ok = false, error = "Unknown tool: " .. tostring(tc.name) }
 					elseif (not toolDef.readOnly) and permMode == "read_only" then
 						toolResult = { ok = false, error = "Denied: Permission mode is Read Only" }
-					elseif (not toolDef.readOnly) and permMode == "ask_first" then
+					elseif (not toolDef.readOnly) and (permMode == "ask_first" or toolDef.requiresApproval == true) then
 						-- Pause and wait for user approval in UI (or custom `opts.onApprove` callback!)
 						local approved = false
 						if type(opts.onApprove) == "function" then
@@ -571,7 +578,9 @@ return function(env)
 							M.pendingApproval = {
 								toolName = tc.name,
 								args = parsedArgs,
-								summary = string.format("%s(%s)", tc.name, tostring(parsedArgs.path or parsedArgs.code or "...")):sub(1, 120),
+								summary = (tc.name == "ai_workspace_transfer_to_project"
+									and string.format("Copy AI artifact %s -> project %s%s", tostring(parsedArgs.source or "?"), tostring(parsedArgs.destination or "?"), parsedArgs.overwrite_existing == true and " (REPLACE EXISTING)" or "")
+									or string.format("%s(%s)", tc.name, tostring(parsedArgs.path or parsedArgs.code or "..."))):sub(1, 180),
 								resolve = function(allow)
 									approved = (allow == true)
 									decided = true

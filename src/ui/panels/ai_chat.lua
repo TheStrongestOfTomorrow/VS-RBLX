@@ -15,6 +15,7 @@ return function(env)
 	local commands = env.require("runtime/command_catalog")
 	local providers = env.require("ai/providers")
 	local agentLoop = env.require("ai/agent_loop")
+	local uaiAdapter = env.require("ai/uai_adapter")
 
 	local M = {}
 
@@ -561,15 +562,52 @@ return function(env)
 		})
 		sendBtn.BackgroundTransparency = 0
 
-		-- Explicit Non-Copyrighted Open-Source Engineering Credit
+		-- Official Project UAI adapter: user-started, compatibility-checked, and updater-owned by UAI.
+		P.button(footer, {
+			name = "OpenProjectUaiBtn",
+			size = UDim2.fromOffset(82, 18),
+			pos = UDim2.fromOffset(0, 74),
+			bg = theme.color.inputBg,
+			hoverBg = theme.color.hover,
+			color = theme.color.accent,
+			bold = true,
+			text = "Project UAI ↗",
+			textSize = 9,
+			radius = 4,
+			zIndex = 24,
+			onClick = function()
+				local state = uaiAdapter.inspect()
+				local function startUai()
+					task.spawn(function()
+						local ok, message, latest = uaiAdapter.open()
+						if ok then overlay.toast(message, "good", 4)
+						else overlay.toast(tostring(message) .. (latest and latest.version and (" · detected " .. latest.version) or ""), "warn", 5) end
+					end)
+				end
+				if state.status == "not_running" then
+					overlay.confirm({
+						title = "Open official Project UAI?",
+						message = "VS-RBLX will fetch UAI's current published loader only after you approve. UAI owns its updater; VS-RBLX will not pin, replace, or manage it. Both run in the same executor trust boundary and UAI may have executor-wide access. Complete UAI's own provider/vault/permission setup before using it.",
+						primaryText = "Load & Open UAI",
+						onPrimary = startUai,
+					})
+				elseif state.status == "compatible" then
+					startUai()
+				else
+					overlay.toast(tostring(state.reason or "Project UAI integration is unavailable."), "warn", 5)
+				end
+			end,
+		})
+
+		-- Explicit open-source engineering attribution
 		P.label(footer, {
 			name = "AiAttributionLabel",
-			size = UDim2.new(1, 0, 0, 18),
-			pos = UDim2.fromOffset(0, 74),
+			size = UDim2.new(1, -88, 0, 18),
+			pos = UDim2.fromOffset(88, 74),
 			textSize = 9,
 			color = theme.color.muted,
 			truncate = true,
-			text = "VS-RBLX AI · Agent loop inspired by Project UAI (MIT © CarlDV / Project-Ptolemy)",
+			text = "Project UAI integration · MIT © CarlDV / Project-Ptolemy",
 			zIndex = 23,
 		})
 

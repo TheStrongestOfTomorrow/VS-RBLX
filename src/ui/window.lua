@@ -120,8 +120,9 @@ return function(env)
 		end
 
 		function win.effectiveMinBounds(bounds)
-			local minW = win.mobileMode and MOBILE_MIN_W or DESKTOP_MIN_W
-			local minH = win.mobileMode and MOBILE_MIN_H or DESKTOP_MIN_H
+			local compactTouchPlay = win.playWhileCoding and responsive.isTouchDevice() and responsive.compact
+			local minW = (win.mobileMode or compactTouchPlay) and MOBILE_MIN_W or DESKTOP_MIN_W
+			local minH = (win.mobileMode or compactTouchPlay) and MOBILE_MIN_H or DESKTOP_MIN_H
 			return math.min(minW, bounds.width), math.min(minH, bounds.height)
 		end
 
@@ -130,8 +131,11 @@ return function(env)
 			local effMinW, effMinH = win.effectiveMinBounds(bounds)
 
 			if win.playWhileCoding then
-				-- Play-While-Coding Split Peek: docks to right ~52% so left half stays free for thumbstick & gameplay!
-				local dockW = math.max(effMinW, math.floor(bounds.width * 0.52))
+				-- On compact touch screens use a taller coding dock while preserving a
+				-- meaningful gameplay strip; desktop-sized windows retain the 52% peek.
+				local compactTouchPlay = responsive.isTouchDevice() and responsive.compact
+				local dockRatio = compactTouchPlay and 0.68 or 0.52
+				local dockW = math.max(effMinW, math.floor(bounds.width * dockRatio))
 				local dockH = math.max(effMinH, math.floor(bounds.height * 0.94))
 				root.Position = UDim2.fromOffset(bounds.x + bounds.width - dockW, bounds.y)
 				root.Size = UDim2.fromOffset(dockW, dockH)

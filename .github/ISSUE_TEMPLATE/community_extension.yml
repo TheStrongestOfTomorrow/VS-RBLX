@@ -1,5 +1,5 @@
-name: "Submit Community Extension (5 Allowed Templates)"
-description: "Submit a verified declarative Theme, Snippet Pack, Macro, Keymap, or Quick-Tool JSON manifest."
+name: "Community Extension Submission"
+description: "Submit a safe declarative VS-RBLX theme, snippet pack, macro, keymap, or toolbar tool."
 title: "[EXT] "
 labels:
   - "community-extension"
@@ -7,18 +7,18 @@ body:
   - type: markdown
     attributes:
       value: |
-        > [!WARNING]
-        > **GitHub Issues on `VS-RBLX` are strictly locked to the 5 Verified Declarative Extension Templates.**
-        > Every opened or edited issue is scanned automatically by **GitHub Actions** and again by the **in-client VS-RBLX Malware Scanner**.
-        > - **Allowed Templates (`5` only):** `theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, `toolbar-tool`
-        > - **Strictly Forbidden:** `loadstring`, `HttpGet`, `request`, webhooks (`discord.com/api/webhooks`, Slack, Telegram), `getgenv`, `hookfunction`, `writefile`/`delfile`, obfuscators, escaped bytecode, or off-topic posts.
-        > - Non-conforming or malicious issues are **automatically closed**, while comments on verified extension issues remain open!
+        ## Before you submit
+        This repository accepts **five declarative formats only**: `theme-pack`, `snippet-pack`, `command-macro`, `keymap-preset`, and `toolbar-tool`. These formats are intentionally limited and cannot run arbitrary Luau.
+
+        **Never include** executable scripts, bytecode, obfuscated payloads, outbound requests, credentials, executor APIs, or instructions to bypass Roblox/VS-RBLX security. Actions scan new and edited issues; unsafe or malformed submissions are closed. Comments on accepted issues remain open for normal discussion and reviews, but comments are never releases.
+
+        Read [CONTRIBUTING_EXTENSIONS.md](https://github.com/TheStrongestOfTomorrow/VS-RBLX/blob/main/CONTRIBUTING_EXTENSIONS.md) for the full guide, compatibility notes, examples, review process, and troubleshooting. Submit only work you created or are licensed to share.
 
   - type: dropdown
     id: ext_template
     attributes:
-      label: "Extension Template"
-      description: "Select the exact declarative template your manifest implements."
+      label: Declarative template type
+      description: "Choose a format supported by both the VS-RBLX runtime and validator. Do not submit executable plugins."
       options:
         - "theme-pack"
         - "snippet-pack"
@@ -31,80 +31,102 @@ body:
   - type: input
     id: ext_id
     attributes:
-      label: "Extension ID"
-      description: "Unique lowercase kebab-case identifier (max 48 chars). Must match manifest.id."
-      placeholder: "crimson-midnight-theme"
+      label: Extension ID
+      description: "Stable unique identifier, lowercase kebab-case, 2–48 characters; must equal manifest.id. Do not change it for later versions."
+      placeholder: "aurora-midnight"
     validations:
       required: true
 
   - type: input
     id: display_name
     attributes:
-      label: "Display Name"
-      description: "Human-readable extension title (3-64 characters). Must match manifest.name."
-      placeholder: "Crimson Midnight"
+      label: Display name
+      description: "Human-readable title, 3–64 characters; must equal manifest.name."
+      placeholder: "Aurora Midnight"
     validations:
       required: true
 
   - type: input
     id: ext_version
     attributes:
-      label: "Version"
-      description: "Strict Semantic Version (X.Y.Z). Must match manifest.version."
+      label: Initial version
+      description: "Use strict SemVer X.Y.Z (for example 1.0.0). Later releases use the separate owner-only Version Update form."
       placeholder: "1.0.0"
       value: "1.0.0"
     validations:
       required: true
 
+  - type: input
+    id: compatibility
+    attributes:
+      label: Tested VS-RBLX version/build (optional)
+      description: "State the version/build and Roblox client/device tested, or write Not tested. Do not claim compatibility you have not checked."
+      placeholder: "VS-RBLX 1.0.0 · Roblox desktop client · not yet tested"
+    validations:
+      required: false
+
   - type: textarea
     id: ext_summary
     attributes:
-      label: "Summary"
-      description: "Short plain-text description of what this declarative pack provides (no external links or webhooks)."
-      placeholder: "Deep obsidian and crimson red dark theme for VS-RBLX."
+      label: What does it provide?
+      description: "Plain-text summary of behavior, intended users, and any limitations. No external links, executable instructions, or webhooks."
+      placeholder: "A low-contrast dark theme with warm syntax colors for long coding sessions."
     validations:
       required: true
 
   - type: textarea
     id: manifest_json
     attributes:
-      label: "Manifest JSON"
-      description: "Paste pure JSON only (do not wrap in backticks; GitHub wraps it automatically)."
+      label: Declarative manifest JSON
+      description: "Paste valid JSON only. The template field and required data must match your selected format. Keep all strings concise; do not add keys the runtime does not support."
       render: json
       placeholder: |
         {
-          "id": "crimson-midnight-theme",
-          "name": "Crimson Midnight",
+          "id": "aurora-midnight",
+          "name": "Aurora Midnight",
           "version": "1.0.0",
           "author": "your-github-username",
-          "summary": "Deep obsidian and crimson red dark theme for VS-RBLX.",
+          "summary": "A restrained dark theme for focused editing.",
           "template": "theme-pack",
           "theme": {
             "isLight": false,
             "colors": {
-              "editor": "#0f0609",
-              "sideBar": "#16090e",
-              "accent": "#fb7185",
-              "statusBar": "#e11d48"
+              "editor": "#10131c",
+              "sideBar": "#151a26",
+              "accent": "#7dd3c7",
+              "statusBar": "#263544"
             },
             "syntax": {
-              "keyword": "#fb7185",
-              "string": "#4ade80",
-              "number": "#c084fc",
-              "comment": "#7f5563"
+              "keyword": "#c4a7e7",
+              "string": "#a8d5a2",
+              "number": "#f2c38f",
+              "comment": "#778092"
             }
           }
         }
     validations:
       required: true
 
+  - type: textarea
+    id: preview
+    attributes:
+      label: Preview / review notes (optional)
+      description: "Describe how reviewers can verify the result in the VS-RBLX extension preview. Do not paste scripts or private data."
+      placeholder: "For a theme, compare the editor, sidebar, status bar, and syntax colors in both light/dark UI surfaces."
+    validations:
+      required: false
+
   - type: checkboxes
     id: attestations
     attributes:
-      label: "Security Attestations"
-      description: "All attestations are mandatory."
+      label: Required security and authorship attestations
+      description: "Every box is required. False or misleading attestations may result in rejection."
       options:
-        - label: "This submission strictly uses one of the 5 declarative templates and contains zero executable Luau/bytecode."
+        - label: "I selected one of the five supported declarative templates; this manifest contains no executable Luau, bytecode, or obfuscated payload."
           required: true
-        - label: "This submission contains zero webhooks, outbound URLs, obfuscated strings, or credential reads."
+        - label: "This submission contains no outbound requests, credential access, executor APIs, filesystem operations, or security bypass instructions."
+          required: true
+        - label: "I created this work or have permission to distribute it, and I have included required attribution/license notices."
+          required: true
+        - label: "I understand that Actions and the in-client scanner validate submissions, and that ordinary issue comments are discussion—not version releases."
           required: true

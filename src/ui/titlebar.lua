@@ -22,6 +22,7 @@ return function(env)
 		callbacks = callbacks or {}
 		local h = theme.sizes.titleBar
 		local mobileMode = false
+		local compactTouchMode = false
 
 		local bar = P.frame(parent, {
 			name = "TitleBar",
@@ -522,6 +523,7 @@ return function(env)
 					{ label = "Toggle Primary Sidebar", shortcut = "Ctrl+B", onClick = function() commands.run("view.toggleSidebar") end },
 					{ label = "Toggle Bottom Panel", shortcut = "Ctrl+J", onClick = function() commands.run("view.togglePanel") end },
 					{ label = "Split Editor Right", shortcut = "Ctrl+\\", onClick = function() commands.run("view.splitEditor") end },
+					{ label = "🎮 Toggle Play While Coding", onClick = function() commands.run("mobile.togglePlayWhileCoding") end },
 					{ label = "✦ Toggle Zen Mode", onClick = function() commands.run("workbench.toggleZenMode") end },
 					{ separator = true },
 					{ label = "✦ Toggle Integrated AI Sidebar", shortcut = "Ctrl+Alt+I", onClick = function() commands.run("ai.toggleChat") end },
@@ -567,9 +569,9 @@ return function(env)
 			isCompactWidth = (currentBarWidth < 880) or mobileMode
 			isUltraCompact = currentBarWidth < 540
 
-			drawerBtn.Visible = mobileMode
-			drawerBtn.Size = UDim2.fromOffset(34, h - 2)
-			logo.Visible = (not mobileMode) and (not isUltraCompact)
+			drawerBtn.Visible = mobileMode or compactTouchMode
+			drawerBtn.Size = UDim2.fromOffset(compactTouchMode and 36 or 34, h - 2)
+			logo.Visible = (not mobileMode) and (not isUltraCompact) and (not compactTouchMode)
 
 			-- Left Menu Bar vs Compact `≡ Menu`
 			if mobileMode then
@@ -578,7 +580,8 @@ return function(env)
 			elseif isCompactWidth then
 				menuRow.Visible = false
 				compactMenuBtn.Visible = true
-				compactMenuBtn.Position = UDim2.fromOffset(isUltraCompact and 6 or 30, math.floor((h - 22) * 0.5))
+				local menuX = compactTouchMode and 42 or (isUltraCompact and 6 or 30)
+				compactMenuBtn.Position = UDim2.fromOffset(menuX, math.floor((h - 22) * 0.5))
 			else
 				menuRow.Visible = true
 				menuRow.Position = UDim2.fromOffset(34, 0)
@@ -610,7 +613,7 @@ return function(env)
 			rightCluster.Position = UDim2.new(1, -rightW, 0, 0)
 
 			-- Left occupied width & Center Search Pill exact non-overlapping slot
-			local leftOccupied = mobileMode and 42 or (isCompactWidth and (isUltraCompact and 58 or 84) or 288)
+			local leftOccupied = mobileMode and 42 or (compactTouchMode and 98 or (isCompactWidth and (isUltraCompact and 58 or 84) or 288))
 			local availCenter = currentBarWidth - leftOccupied - rightW - 12
 			if availCenter < 30 then
 				centerPill.Visible = false
@@ -684,6 +687,10 @@ return function(env)
 				bar.Size = UDim2.new(1, 0, 0, h)
 				mobileToggleBtn.BackgroundColor3 = mobileMode and theme.color.accent or theme.color.titleBar
 				mobileToggleBtn.BackgroundTransparency = mobileMode and 0 or 1
+				reflowForWidth(currentBarWidth)
+			end,
+			setCompactTouchMode = function(flag)
+				compactTouchMode = flag == true and not mobileMode
 				reflowForWidth(currentBarWidth)
 			end,
 		}

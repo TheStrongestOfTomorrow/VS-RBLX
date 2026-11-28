@@ -3,7 +3,7 @@
  * VS-RBLX Static CDN Marketplace Compiler & Sub-Issue SemVer Resolver
  * (`.github/scripts/build_extension_registry.js`)
  *
- * Compiles verified clean Community Extension GitHub Issues + same-author GitHub Sub-Issues
+ * Compiles verified clean Community Extension GitHub Issues + gatekeeper-validated owner-authored version sub-issues
  * into 10-per-page static JSON files (`registry/index.json`, `registry/page-1.json`, ...)
  * served via `raw.githubusercontent.com` CDN with ZERO GitHub REST API 60/hr rate limit!
  */
@@ -13,6 +13,7 @@
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
+const crypto = require("crypto");
 const { validateIssue: scanExtensionIssue } = require("./validate_extension_issue.js");
 
 const PAGE_SIZE = 10;
@@ -30,6 +31,18 @@ function compareSemver(a, b) {
     if (pa[i] !== pb[i]) return pa[i] > pb[i] ? 1 : -1;
   }
   return 0;
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  }
+  return value;
+}
+
+function manifestSha256(manifest) {
+  return crypto.createHash("sha256").update(JSON.stringify(stableValue(manifest)), "utf8").digest("hex");
 }
 
 /**
@@ -59,6 +72,11 @@ function resolveExtensionFamily(parentIssue, subIssues) {
   for (const sub of subIssues || []) {
     if (!sub || sub.pull_request) continue;
     if (sub.state && sub.state !== "open") continue;
+    const labels = (sub.labels || []).map((item) => typeof item === "string" ? item : item.name);
+    if (!labels.includes("community-extension-version") || !/^\[EXT-VERSION\]\s+/i.test(String(sub.title || ""))) {
+      rejectedSubIssues.push({ issueNumber: sub.number, reason: "Not a gatekeeper-validated version sub-issue" });
+      continue;
+    }
 
     const subAuthor = String((sub.user && sub.user.login) || "").trim();
     if (!parentAuthor || subAuthor.toLowerCase() !== parentAuthor.toLowerCase()) {
@@ -107,6 +125,10 @@ function resolveExtensionFamily(parentIssue, subIssues) {
     versionHistory: validVersions.map((v) => ({
       version: v.version,
       issueNumber: v.issueNumber,
+      author: String((v.manifest && v.manifest.author) || parentAuthor || ""),
+      artifactSha256: manifestSha256(v.manifest),
+      scanStatus: "passed",
+      scanPolicy: "community-extension-schema-v1",
     })),
     rejectedSubIssues,
     htmlUrl: newest.htmlUrl || parentIssue.html_url || "",
@@ -162,21 +184,27 @@ function writeRegistryFiles(outDir, resolvedItems, repoSlug = "TheStrongestOfTom
 }
 
 function makeFormBody(manifest) {
+  const formManifest = Object.assign({ summary: "Verified declarative community extension." }, manifest);
   return [
     "### Extension Template",
-    manifest.template,
+    formManifest.template,
     "### Extension ID",
-    manifest.id,
+    formManifest.id,
     "### Display Name",
-    manifest.name,
+    formManifest.name,
     "### Version",
-    manifest.version,
+    formManifest.version,
     "### Summary",
-    manifest.summary || "Verified declarative community extension.",
+    formManifest.summary,
     "### Manifest JSON",
     "```json",
-    JSON.stringify(manifest, null, 2),
+    JSON.stringify(formManifest, null, 2),
     "```",
+    "### Security Attestations",
+    "- [X] I selected one of the five supported declarative templates.",
+    "- [X] This submission contains no outbound requests or credential access.",
+    "- [X] I created this work or have permission to distribute it.",
+    "- [X] I understand comments are discussion, not releases.",
   ].join("\n\n");
 }
 
@@ -186,6 +214,7 @@ function runSelfTest() {
     title: "[EXT] Crimson Midnight",
     user: { login: "RobloxCreator" },
     html_url: "https://github.com/TheStrongestOfTomorrow/VS-RBLX/issues/10",
+    comments: 17,
     body: makeFormBody({
       id: "crimson-midnight",
       name: "Crimson Midnight",
@@ -198,7 +227,8 @@ function runSelfTest() {
   const validUpgradeSub = {
     number: 14,
     state: "open",
-    title: "[EXT] Crimson Midnight v1.2.0",
+    title: "[EXT-VERSION] Crimson Midnight v1.2.0",
+    labels: [{ name: "community-extension-version" }],
     user: { login: "RobloxCreator" },
     body: makeFormBody({
       id: "crimson-midnight",
@@ -212,7 +242,8 @@ function runSelfTest() {
   const spoofSub = {
     number: 15,
     state: "open",
-    title: "[EXT] Hijack Attempt v9.9.9",
+    title: "[EXT-VERSION] Hijack Attempt v9.9.9",
+    labels: [{ name: "community-extension-version" }],
     user: { login: "SomeOtherUser" },
     body: makeFormBody({
       id: "crimson-midnight",
@@ -223,10 +254,25 @@ function runSelfTest() {
     }),
   };
 
+  const unverifiedSub = {
+    number: 17,
+    state: "open",
+    title: "[EXT-VERSION] Unverified Update v8.0.0",
+    user: { login: "RobloxCreator" },
+    body: makeFormBody({
+      id: "crimson-midnight",
+      name: "Crimson Midnight",
+      version: "8.0.0",
+      template: "theme-pack",
+      theme: { colors: { editor: "#000000" } },
+    }),
+  };
+
   const malwareSub = {
     number: 16,
     state: "open",
-    title: "[EXT] Tainted Update v2.0.0",
+    title: "[EXT-VERSION] Tainted Update v2.0.0",
+    labels: [{ name: "community-extension-version" }],
     user: { login: "RobloxCreator" },
     body: makeFormBody({
       id: "crimson-midnight",
@@ -238,11 +284,16 @@ function runSelfTest() {
     }),
   };
 
-  const res = resolveExtensionFamily(parent, [validUpgradeSub, spoofSub, malwareSub]);
+  const res = resolveExtensionFamily(parent, [validUpgradeSub, spoofSub, malwareSub, unverifiedSub]);
   assert.strictEqual(res.ok, true, "Parent + clean sub-issue resolved");
   assert.strictEqual(res.latestVersion, "1.2.0", "Selected highest clean same-author SemVer (1.2.0)");
   assert.strictEqual(res.resolvedIssueNumber, 14, "Resolved to clean sub-issue #14");
-  assert.strictEqual(res.rejectedSubIssues.length, 2, "Blocked cross-author spoof AND tainted malware sub-issue");
+  assert.strictEqual(res.rejectedSubIssues.length, 3, "Blocked cross-author spoof, unverified sub-issue, and tainted malware sub-issue");
+  assert.match(res.versionHistory[0].artifactSha256, /^[a-f0-9]{64}$/, "Audited artifact provenance includes a stable SHA-256 manifest identity");
+  assert.strictEqual(res.versionHistory[0].scanStatus, "passed", "Registry provenance records the validation verdict");
+  const commentOnly = resolveExtensionFamily(parent, []);
+  assert.strictEqual(commentOnly.latestVersion, "1.0.0", "Ordinary parent comments never create or change a release version");
+  assert.strictEqual(commentOnly.versionHistory.length, 1, "Only parent manifest and validated linked sub-issues form release history");
 
   // Verify 10-per-page pagination across 13 items -> 2 pages (10 + 3)
   const dummyItems = [];
@@ -252,7 +303,7 @@ function runSelfTest() {
   assert.strictEqual(sliced[0].length, 10, "Page 1 has 10 items");
   assert.strictEqual(sliced[1].length, 3, "Page 2 has remaining 3 items");
 
-  console.log("PASS build_extension_registry.js self-test (SemVer=1.2.0, spoof=BLOCKED, malware=BLOCKED, pagination=10/page)");
+  console.log("PASS build_extension_registry.js self-test (SemVer=1.2.0, owner spoof/unverified/malware/comments=BLOCKED, pagination=10/page)");
 }
 
 if (require.main === module) {

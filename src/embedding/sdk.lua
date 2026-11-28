@@ -31,6 +31,8 @@ return function(env)
 	local aiProviders = env.require("ai/providers")
 	local aiTools = env.require("ai/tools")
 	local aiAgent = env.require("ai/agent_loop")
+	local aiWorkspace = env.require("runtime/ai_workspace")
+	local uaiAdapter = env.require("ai/uai_adapter")
 
 	local M = {}
 
@@ -70,6 +72,8 @@ return function(env)
 			snapshots = snapshots,
 			aiProviders = aiProviders,
 			aiTools = aiTools,
+			aiWorkspace = aiWorkspace,
+			uaiAdapter = uaiAdapter,
 			aiAgent = aiAgent,
 			ai = aiAgent,
 			git = gitState,

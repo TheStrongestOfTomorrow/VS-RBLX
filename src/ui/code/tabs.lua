@@ -18,6 +18,7 @@ return function(env)
 		local pane = paneName or "primary"
 		local h = theme.sizes.tabBar
 		local mobileMode = false
+		local touchDesktopMode = false
 
 		local root = P.frame(parent, {
 			name = "TabBar_" .. pane,
@@ -197,6 +198,7 @@ return function(env)
 		local currentBarW = 800
 
 		local function rebuild()
+			local touchTargets = mobileMode or touchDesktopMode
 			root.Size = UDim2.new(1, 0, 0, h)
 			local compact = currentBarW < 520
 			local totalTabs = #codeStore.tabs
@@ -223,18 +225,18 @@ return function(env)
 			local actionW = canPrev and 180 or 108
 			tabsScroll.Size = UDim2.new(1, -actionW, 1, -1)
 
-			local btnH = mobileMode and 32 or 26
+			local btnH = touchTargets and 32 or 26
 			previewBtn.Size = UDim2.fromOffset(68, btnH)
-			runBtn.Size = UDim2.fromOffset(mobileMode and 34 or 30, btnH)
-			saveBtn.Size = UDim2.fromOffset(mobileMode and 40 or 36, btnH)
-			splitBtn.Size = UDim2.fromOffset(mobileMode and 32 or 28, btnH)
+			runBtn.Size = UDim2.fromOffset(touchTargets and 34 or 30, btnH)
+			saveBtn.Size = UDim2.fromOffset(touchTargets and 40 or 36, btnH)
+			splitBtn.Size = UDim2.fromOffset(touchTargets and 32 or 28, btnH)
 
 			tabsScroll:ClearAllChildren()
 			P.list(tabsScroll, Enum.FillDirection.Horizontal, 1)
 
 			for idx, doc in ipairs(codeStore.tabs) do
 				local isCurrent = (doc.id == activeId)
-				local minTabW = mobileMode and 132 or 116
+				local minTabW = touchTargets and 132 or 116
 				local tabW = math.max(minTabW, math.min(216, #doc.title * 7 + (doc.pinned and 72 or 62)))
 				local tabBtn = P.button(tabsScroll, {
 					name = "Tab_" .. doc.title,
@@ -254,7 +256,7 @@ return function(env)
 				if isCurrent then
 					P.frame(tabBtn, {
 						name = "ActiveTopAccent",
-						size = UDim2.new(1, 0, 0, mobileMode and 3 or 2),
+						size = UDim2.new(1, 0, 0, touchTargets and 3 or 2),
 						bg = theme.color.tabActiveTop,
 						zIndex = 24,
 					})
@@ -277,12 +279,12 @@ return function(env)
 					titleX = 44
 				end
 
-				local closeSize = mobileMode and 26 or 20
+				local closeSize = touchTargets and 26 or 20
 				P.label(tabBtn, {
 					size = UDim2.new(1, -(titleX + closeSize + 8), 1, 0),
 					pos = UDim2.fromOffset(titleX, 0),
 					text = doc.title,
-					textSize = mobileMode and 13 or 12,
+					textSize = touchTargets and 13 or 12,
 					color = isCurrent and theme.color.tabActiveText or theme.color.tabInactiveText,
 					truncate = true,
 					zIndex = 23,
@@ -381,7 +383,12 @@ return function(env)
 			height = function() return h end,
 			setMobileMode = function(flag)
 				mobileMode = flag == true
-				h = mobileMode and 42 or theme.sizes.tabBar
+				h = mobileMode and 42 or (touchDesktopMode and 38 or theme.sizes.tabBar)
+				rebuild()
+			end,
+			setTouchDesktopMode = function(flag)
+				touchDesktopMode = flag == true and not mobileMode
+				h = mobileMode and 42 or (touchDesktopMode and 38 or theme.sizes.tabBar)
 				rebuild()
 			end,
 			setTransparency = function(bgTrans)

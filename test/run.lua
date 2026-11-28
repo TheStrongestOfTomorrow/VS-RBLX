@@ -62,7 +62,7 @@ check("1. Boot dist/vsrblx.lua via loadstring(game:HttpGet(...))() with zero loa
 
 	assertEq(api.version, "1.0.0", "SDK version")
 	assertTrue(api.buildId:find("^1%.0%.0%-") ~= nil, "Deterministic FNV-1a build ID bound from __VSRBLX_BUILD")
-	assertTrue(api._env.moduleTotal == 91, "All 91 __VSRBLX_MODULES registered in lexical table")
+	assertTrue(api._env.moduleTotal == 93, "All 93 __VSRBLX_MODULES registered in lexical table")
 	assertTrue(H.sandbox.getgenv().VSRBLX == api, "Registered on getgenv().VSRBLX")
 
 	-- First-boot Master Vault onboarding modal surfaces automatically and allows opting out ("Leave Unencrypted")
@@ -744,6 +744,31 @@ check("9. Combined Sprint 4 + Sprint 5: Multi-Language Live Split Preview Engine
 	assertTrue(promptModal ~= nil, "Touch device auto-surfaced Acode Mobile Mode switch prompt!")
 	HMobile.click(HMobile.byName("ConfirmPrimaryBtn"))
 	assertTrue(mobApi.isMobileMode() == true, "Accepting prompt switched player straight into Acode Mobile Mode!")
+
+	-- A player can deliberately switch back to Desktop Mode on touch hardware.
+	mobApi.setMobileMode(false)
+	assertEq(mobApi.isMobileMode(), false, "Desktop Mode remains selectable on a touch device")
+	assertEq(HMobile.byName("CompactMenuBtn").Visible, true, "Compact touch Desktop keeps the compact desktop menu")
+	assertEq(HMobile.byName("VSCodeBrand").Visible, false, "Compact touch Desktop avoids logo overlap with its drawer/menu controls")
+	assertTrue(HMobile.byName("MobileDrawerBtn").AbsolutePosition.X + HMobile.byName("MobileDrawerBtn").AbsoluteSize.X <= HMobile.byName("CompactMenuBtn").AbsolutePosition.X,
+		"Compact touch Desktop drawer and menu buttons do not overlap in landscape")
+	HMobile.setViewport(390, 844)
+	assertEq(HMobile.byName("MobileQuickKeysBar").Visible, false, "Desktop Mode does not inherit Acode Quick-Keys")
+	assertEq(HMobile.byName("MobileDrawerBtn").Visible, true, "Compact touch Desktop retains a reachable workspace drawer button")
+	assertEq(HMobile.byName("TabBar_primary").Size.Y.Offset, 38, "Compact touch Desktop uses larger tabs without switching to Acode styling")
+	assertEq(HMobile.byName("ActivityBar").Visible, false, "Compact touch Desktop hides the width-consuming activity rail")
+	assertEq(HMobile.byName("PrimarySideBar").Visible, false, "Compact touch Desktop keeps the workspace drawer closed by default")
+	assertEq(HMobile.byName("MainEditorAndPanelStack").Size.X.Scale, 1, "Compact touch Desktop gives the editor the full available width")
+	HMobile.click(HMobile.byName("MobileDrawerBtn"))
+	assertEq(HMobile.byName("PrimarySideBar").Visible, true, "Workspace drawer opens on demand in compact touch Desktop")
+	assertEq(HMobile.byName("MobileDrawerNav").Visible, true, "Compact touch Desktop exposes the viewlet switcher in its drawer")
+	HMobile.click(HMobile.byName("MobileDrawerBackdrop"))
+	assertEq(HMobile.byName("PrimarySideBar").Visible, false, "Compact touch Desktop drawer dismisses cleanly")
+	mobApi.app.window.setPlayWhileCoding(true)
+	assertEq(mobApi.isMobileMode(), false, "Play-While-Coding does not force Acode Mode")
+	assertTrue(HMobile.byName("VSCodeWindow").Size.X.Offset <= 280, "Compact touch Desktop uses a narrow right-side coding dock")
+	assertTrue(HMobile.byName("VSCodeWindow").Position.X.Offset >= 90, "Compact touch Desktop dock preserves visible gameplay space")
+	mobApi.app.window.setPlayWhileCoding(false)
 	mobApi.destroy()
 end)
 
@@ -1124,6 +1149,170 @@ check("12. Combined Sprint v2B — VS Code Integrated AI Editor, Static CDN 10/P
 	assertTrue(aiSidebar ~= nil and aiSidebar.Visible == true, "Clicking `✦ AI` opened VS Code Secondary Right-Side AI Sidebar")
 	local attrLbl = H.byName("AiAttributionLabel")
 	assertTrue(attrLbl ~= nil and attrLbl.Text:find("Project UAI", 1, true) ~= nil, "AI Sidebar explicitly credits Project UAI (MIT © CarlDV / Project-Ptolemy)")
+	assertTrue(H.byName("OpenProjectUaiBtn") ~= nil, "AI sidebar exposes the explicit official Project UAI integration button")
+	local genv = H.sandbox.getgenv()
+	local originalUai = genv.UAI
+	local uaiShowCalls = 0
+	genv.UAI = {
+		alive = true,
+		version = "4.1.1",
+		build = "test-build",
+		sdk = {
+			version = "1.1.0",
+			features = { requests = true, resourceScopes = true },
+			createScope = function() end,
+			request = function() end,
+		},
+		sessions = { open = function() end },
+		show = function(panel)
+			assertEq(panel, "chat", "Project UAI adapter opens the documented chat panel")
+			uaiShowCalls = uaiShowCalls + 1
+			return true
+		end,
+	}
+	local compatibleUai = api.uaiAdapter.inspect()
+	assertTrue(compatibleUai.compatible and compatibleUai.sdkVersion == "1.1.0", "UAI health adapter recognizes the documented SDK capability contract")
+	local openedUai = api.uaiAdapter.open()
+	assertTrue(openedUai and uaiShowCalls == 1, "UAI integration reuses a compatible live client through its public show method")
+	genv.UAI.sdk.features.resourceScopes = false
+	assertEq(api.uaiAdapter.inspect().status, "incompatible", "UAI adapter fails safely when a required upstream capability disappears")
+	genv.UAI.sdk.features.resourceScopes = true
+	genv.UAI.show = function() return false, "UAI vault is locked" end
+	local rejectedUaiOpen, uaiOpenReason = api.uaiAdapter.open()
+	assertTrue(not rejectedUaiOpen and tostring(uaiOpenReason):find("vault is locked", 1, true) ~= nil,
+		"UAI adapter surfaces upstream admission failures without bypassing setup or unlock")
+	genv.UAI = originalUai
+
+	-- AI can inspect the full selected project tree with bounded/paged source reads.
+	local projectListing = api.aiTools.execute("workspace_list_files", { limit = 5 })
+	assertTrue(projectListing.ok and projectListing.total >= #projectListing.files and projectListing.root ~= nil,
+		"AI workspace listing recursively reports project root and paged file inventory")
+	local otherProject = "ai_scope_test"
+	H.sandbox.makefolder("VSRBLX/workspaces/" .. otherProject)
+	H.sandbox.makefolder("VSRBLX/workspaces/" .. otherProject .. "/src")
+	H.sandbox.writefile("VSRBLX/workspaces/" .. otherProject .. "/src/authorized.luau", "return 'authorized project'\n")
+	local deniedProjectRead = api.aiTools.execute("workspace_read_file", {
+		project = otherProject,
+		path = "src/authorized.luau",
+	})
+	assertTrue(not deniedProjectRead.ok, "AI cannot read another named project before explicit authorization")
+	local availableProjects = api.aiTools.execute("workspace_list_available_projects", {})
+	assertTrue(availableProjects.ok and table.concat(availableProjects.projects, ","):find(otherProject, 1, true) ~= nil,
+		"AI can see project names without receiving their content access")
+	assertTrue(api.aiTools.find("workspace_authorize_project").requiresApproval == true,
+		"Named-project authorization requires an in-UI approval even in Auto Edit mode")
+	local projectGrant = api.aiTools.execute("workspace_authorize_project", { project = otherProject })
+	assertTrue(projectGrant.ok and projectGrant.access == "read-only for this conversation",
+		"Explicit authorization grants read-only access to the requested named project")
+	local authorizedProjectRead = api.aiTools.execute("workspace_read_file", {
+		project = otherProject,
+		path = "src/authorized.luau",
+	})
+	assertTrue(authorizedProjectRead.ok and authorizedProjectRead.content:find("authorized project", 1, true) ~= nil,
+		"Authorized project content is readable without switching the active editor workspace")
+	assertTrue(api.aiTools.execute("workspace_list_files", { project = otherProject }).ok
+		and api.aiTools.execute("workspace_search", { project = otherProject, query = "authorized project" }).ok,
+		"Explicitly authorized named projects support complete AI listing and search")
+	local activeThreadForGrant = api.aiAgent.currentThread()
+	api.aiTools.setThread("unrelated-thread-scope")
+	assertTrue(not api.aiTools.execute("workspace_read_file", {
+		project = otherProject,
+		path = "src/authorized.luau",
+	}).ok, "Named project authorization does not leak across AI conversations")
+	if activeThreadForGrant then api.aiTools.setThread(activeThreadForGrant.id) end
+	local projectPage = api.aiTools.execute("workspace_read_file", {
+		path = "src/main.luau",
+		max_bytes = 16,
+	})
+	assertTrue(projectPage.ok and projectPage.truncated and projectPage.nextOffset > 0 and #projectPage.content <= 16,
+		"AI project-file reads return bounded pages for large source files")
+	local projectPage2 = api.aiTools.execute("workspace_read_file", {
+		path = "src/main.luau",
+		offset = projectPage.nextOffset,
+		max_bytes = 16,
+	})
+	assertTrue(projectPage2.ok and projectPage2.offset >= projectPage.nextOffset and projectPage2.content ~= "",
+		"AI can continue reading a project source file with the next offset")
+
+	-- AI-generated artifacts have an executor-backed root that cannot spill into the game project.
+	local isolatedPath = "roadmap_isolation_fixture.luau"
+	local isolatedWrite = api.aiTools.execute("ai_workspace_write_file", {
+		path = isolatedPath,
+		content = "return 'private AI workspace'",
+	})
+	assertTrue(isolatedWrite.ok and isolatedWrite.root:find("/ai/workspaces/", 1, true) ~= nil,
+		"AI artifact tool writes into the dedicated AI workspace root")
+	assertEq(api.workspace.readFile(isolatedPath), nil, "AI workspace file is not visible in the active game/project workspace")
+	local isolatedRead = api.aiTools.execute("ai_workspace_read_file", { path = isolatedPath })
+	assertTrue(isolatedRead.ok and isolatedRead.content == "return 'private AI workspace'", "AI workspace read tool retrieves its own file")
+	local isolatedListing = api.aiTools.execute("ai_workspace_list_files", { limit = 20 })
+	assertTrue(isolatedListing.ok and #isolatedListing.files >= 1, "AI workspace provides a separate paged file listing")
+	local currentThread = api.aiAgent.currentThread()
+	local firstThreadId = currentThread and currentThread.id or "thread-test-one"
+	api.aiWorkspace.setThread(firstThreadId)
+	local perThreadPath = "thread_scope_fixture.txt"
+	api.aiWorkspace.writeFile(perThreadPath, "first thread artifact")
+	api.aiWorkspace.setThread("thread-test-two")
+	assertEq(api.aiWorkspace.readFile(perThreadPath), nil, "AI artifact workspace is isolated by thread")
+	api.aiWorkspace.setThread(firstThreadId)
+	assertEq(api.aiWorkspace.readFile(perThreadPath), "first thread artifact", "Returning to an AI thread restores its artifact scope")
+	api.aiWorkspace.deleteFile(perThreadPath)
+	if currentThread then api.aiWorkspace.setThread(currentThread.id) end
+	local escapedWrite = api.aiWorkspace.writeFile("../workspace_escape.luau", "bad")
+	assertEq(escapedWrite, false, "AI workspace rejects path traversal")
+	assertTrue(api.aiTools.find("ai_workspace_transfer_to_project").requiresApproval == true,
+		"AI artifact transfer always requires an in-UI approval even in Auto Edit mode")
+	local noConsent = api.aiTools.execute("ai_workspace_transfer_to_project", {
+		source = isolatedPath,
+		destination = "transferred_fixture.luau",
+	})
+	assertTrue(not noConsent.ok and api.workspace.readFile("transferred_fixture.luau") == nil,
+		"AI artifact transfer refuses to run without explicit user consent flag")
+	local approvedTransfer = api.aiTools.execute("ai_workspace_transfer_to_project", {
+		source = isolatedPath,
+		destination = "transferred_fixture.luau",
+		confirm_transfer = true,
+	})
+	assertTrue(approvedTransfer.ok and api.workspace.readFile("transferred_fixture.luau") == "return 'private AI workspace'",
+		"Explicitly approved AI artifact transfer copies into active project only")
+	local overwriteBlocked = api.aiTools.execute("ai_workspace_transfer_to_project", {
+		source = isolatedPath,
+		destination = "transferred_fixture.luau",
+		confirm_transfer = true,
+	})
+	assertTrue(not overwriteBlocked.ok, "AI artifact transfer refuses to overwrite existing project files by default")
+	local overwriteApproved = api.aiTools.execute("ai_workspace_transfer_to_project", {
+		source = isolatedPath,
+		destination = "transferred_fixture.luau",
+		confirm_transfer = true,
+		overwrite_existing = true,
+	})
+	assertTrue(overwriteApproved.ok, "Existing project file replacement requires separate explicit approval")
+	api.workspace.deletePath("transferred_fixture.luau")
+	api.aiWorkspace.deleteFile(isolatedPath)
+
+	-- AI can traverse the live DataModel and read script source when the executor exposes it.
+	local fixtureRoot = H.sandbox.Instance.new("Folder")
+	fixtureRoot.Name = "AgentTraversalFixture"
+	fixtureRoot.Parent = H.sandbox.workspace
+	local fixtureFolder = H.sandbox.Instance.new("Folder")
+	fixtureFolder.Name = "Nested"
+	fixtureFolder.Parent = fixtureRoot
+	local fixtureScript = H.sandbox.Instance.new("ModuleScript")
+	fixtureScript.Name = "FixtureModule"
+	fixtureScript.Source = "return 42"
+	fixtureScript.Parent = fixtureFolder
+	local treeResult = api.aiTools.execute("inspect_roblox_tree", {
+		path = "Workspace.AgentTraversalFixture",
+		depth = 3,
+		limit = 20,
+	})
+	assertTrue(treeResult.ok and treeResult.tree.children[1].children[1].isScript, "Live DataModel inspection recursively discovers nested script containers")
+	local sourceResult = api.aiTools.execute("read_roblox_script", {
+		path = "Workspace.AgentTraversalFixture.Nested.FixtureModule",
+	})
+	assertTrue(sourceResult.ok and sourceResult.source == "return 42", "AI can read live script source through the read-only DataModel tool")
+	fixtureRoot:Destroy()
 
 	-- Default Out-of-the-Box Provider is Kilo Code (`kilo` · `kilo-auto/free`) with ZERO API key required!
 	assertEq(api.aiProviders.activeProviderId(), "kilo", "Default out-of-the-box AI provider is `kilo` (Kilo Code Free Gateway)")

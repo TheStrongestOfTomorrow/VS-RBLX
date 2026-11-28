@@ -1,0 +1,118 @@
+name: "Community Extension Version Update"
+description: "Publish a validated declarative extension update; only the parent issue author may submit versions."
+title: "[EXT-VERSION] "
+labels:
+  - "community-extension-version"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Owner-only release record
+        This form is only for a **new version sub-issue** of an accepted community extension. The GitHub account that opened the parent extension issue must open this version issue. The gatekeeper verifies ownership and links a valid version issue to its parent; other accounts cannot publish releases.
+
+        **Do not post a release in comments.** Parent issue comments stay available for ordinary reviews and discussion. Use the exact original extension ID and template, and increment strict SemVer. Updates are declarative and are scanned again before they can appear in the client registry.
+
+        See [CONTRIBUTING_EXTENSIONS.md](https://github.com/TheStrongestOfTomorrow/VS-RBLX/blob/main/CONTRIBUTING_EXTENSIONS.md#publishing-a-version-update) before submitting.
+
+  - type: input
+    id: parent_issue
+    attributes:
+      label: Parent Extension Issue
+      description: "Enter the numeric issue number of the accepted [EXT] parent (for example 123). Do not enter a URL."
+      placeholder: "123"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ext_template
+    attributes:
+      label: Original declarative template
+      description: "Must exactly match the parent extension."
+      options:
+        - "theme-pack"
+        - "snippet-pack"
+        - "command-macro"
+        - "keymap-preset"
+        - "toolbar-tool"
+    validations:
+      required: true
+
+  - type: input
+    id: ext_id
+    attributes:
+      label: Original Extension ID
+      description: "Copy the stable ID from the parent issue exactly."
+      placeholder: "aurora-midnight"
+    validations:
+      required: true
+
+  - type: input
+    id: display_name
+    attributes:
+      label: Display name
+      description: "Must match the parent manifest."
+      placeholder: "Aurora Midnight"
+    validations:
+      required: true
+
+  - type: input
+    id: ext_version
+    attributes:
+      label: New version
+      description: "Strict SemVer X.Y.Z, greater than the parent's original version. The bot rejects invalid, duplicate, or lower releases."
+      placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: changelog
+    attributes:
+      label: Changelog
+      description: "Describe what changed and any compatibility risks. Do not use comments as a release record."
+      placeholder: "Improved muted syntax contrast and corrected the status bar color."
+    validations:
+      required: true
+
+  - type: textarea
+    id: ext_summary
+    attributes:
+      label: Extension summary
+      description: "Repeat the parent summary or provide a concise current description. The manifest summary must match this field."
+      placeholder: "A restrained dark theme with improved syntax contrast."
+    validations:
+      required: true
+
+  - type: textarea
+    id: manifest_json
+    attributes:
+      label: Complete updated manifest JSON
+      description: "Submit the complete manifest, not a diff. Keep the same id/template/name as the parent; set the version above."
+      render: json
+      placeholder: |
+        {
+          "id": "aurora-midnight",
+          "name": "Aurora Midnight",
+          "version": "1.1.0",
+          "author": "your-github-username",
+          "summary": "A restrained dark theme with improved syntax contrast.",
+          "template": "theme-pack",
+          "theme": {
+            "isLight": false,
+            "colors": { "editor": "#10131c", "sideBar": "#151a26", "accent": "#7dd3c7" }
+          }
+        }
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: attestations
+    attributes:
+      label: Security Attestations
+      description: "Every box is required."
+      options:
+        - label: "I am the GitHub author of the parent extension issue and this is an intentional release by that owner."
+          required: true
+        - label: "This is a complete supported declarative manifest with no executable code, bytecode, outbound requests, credential access, or executor APIs."
+          required: true
+        - label: "I have preserved original attribution/license notices and disclosed compatibility risks in the changelog."
+          required: true
